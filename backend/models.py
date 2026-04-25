@@ -1,5 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
+
+
+def _now():
+    """Return the current UTC time as a timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 db = SQLAlchemy()
 
@@ -12,8 +17,8 @@ class Student(db.Model):
     name = db.Column(db.String(200), nullable=False)
     email = db.Column(db.String(200), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_now)
+    updated_at = db.Column(db.DateTime, default=_now, onupdate=_now)
 
     face_data = db.relationship("FaceData", backref="student", lazy=True, cascade="all, delete-orphan")
     login_logs = db.relationship("LoginLog", backref="student", lazy=True, cascade="all, delete-orphan")
@@ -36,7 +41,7 @@ class FaceData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False)
     face_encoding = db.Column(db.LargeBinary, nullable=False)
-    captured_at = db.Column(db.DateTime, default=datetime.utcnow)
+    captured_at = db.Column(db.DateTime, default=_now)
 
     def to_dict(self):
         return {
@@ -51,7 +56,7 @@ class LoginLog(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False)
-    login_time = db.Column(db.DateTime, default=datetime.utcnow)
+    login_time = db.Column(db.DateTime, default=_now)
     logout_time = db.Column(db.DateTime, nullable=True)
     ip_address = db.Column(db.String(50), nullable=True)
     face_match_score = db.Column(db.Float, nullable=True)
@@ -77,7 +82,7 @@ class MoodleSession(db.Model):
     moodle_user_id = db.Column(db.String(100), nullable=True)
     session_token = db.Column(db.String(500), nullable=False)
     expires_at = db.Column(db.DateTime, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_now)
 
     def to_dict(self):
         return {

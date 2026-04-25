@@ -148,13 +148,7 @@ def create_app() -> Flask:
                         best_match = student
 
             if best_match is None:
-                log = LoginLog(
-                    student_id=None,
-                    ip_address=ip,
-                    status="failed",
-                    face_match_score=None,
-                )
-                # student_id is NOT NULL in schema — skip logging anonymous failures
+                # student_id is NOT NULL — skip logging anonymous failures
                 return jsonify({"error": "Face not recognised"}), 401
 
             log = LoginLog(

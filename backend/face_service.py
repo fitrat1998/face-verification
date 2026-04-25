@@ -1,5 +1,7 @@
 import io
 import logging
+import os
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -18,7 +20,11 @@ except ImportError:  # pragma: no cover
         "face_recognition library not available. Face verification will be disabled."
     )
 
-FACE_MATCH_THRESHOLD = 0.5  # lower is stricter
+# Face match threshold — lower value = stricter matching.
+# Typical range: 0.4 (very strict) to 0.6 (lenient).
+# Default 0.5 is a good starting point; tune based on observed false-positive/
+# negative rates for your student population and camera hardware.
+FACE_MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.5"))
 
 
 def encode_face_from_bytes(image_bytes: bytes) -> list[float] | None:
