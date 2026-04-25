@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register - FaceAuth</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- face-api.js for client-side face detection -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎓 FaceAuth</div>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="register.html" class="active">Register</a></li>
+      <li><a href="login.html">Login</a></li>
+    </ul>
+  </nav>
+
+  <main class="auth-main">
+    <div class="auth-card">
+      <h2>Student Registration</h2>
+      <p class="auth-subtitle">Create your account and register your face for secure login.</p>
+
+      <!-- Step 1: Personal Information -->
+      <section id="step-info" class="step active">
+        <h3>Step 1: Personal Information</h3>
+        <form id="infoForm" novalidate>
+          <div class="form-group">
+            <label for="studentId">Student ID *</label>
+            <input type="text" id="studentId" name="studentId" required placeholder="e.g. STU-2024-001" />
+          </div>
+          <div class="form-group">
+            <label for="name">Full Name *</label>
+            <input type="text" id="name" name="name" required placeholder="e.g. John Smith" />
+          </div>
+          <div class="form-group">
+            <label for="email">Email Address *</label>
+            <input type="email" id="email" name="email" required placeholder="john@university.edu" />
+          </div>
+          <div class="form-group">
+            <label for="password">Password *</label>
+            <input type="password" id="password" name="password" required minlength="8" placeholder="Minimum 8 characters" />
+          </div>
+          <button type="submit" class="btn btn-primary btn-full">Next: Capture Face</button>
+        </form>
+      </section>
+
+      <!-- Step 2: Face Capture -->
+      <section id="step-face" class="step">
+        <h3>Step 2: Face Capture</h3>
+        <p class="hint">Position your face in the frame and capture 3–5 photos from different angles.</p>
+
+        <div class="camera-container">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="overlay"></canvas>
+          <div id="faceStatus" class="face-status">Starting camera…</div>
+        </div>
+
+        <div class="capture-controls">
+          <button id="captureBtn" class="btn btn-primary" disabled>📸 Capture Photo</button>
+          <span id="captureCount">0 / 5 captured</span>
+        </div>
+
+        <div id="previews" class="preview-grid"></div>
+
+        <div class="step-actions">
+          <button id="backBtn" class="btn btn-secondary">← Back</button>
+          <button id="submitBtn" class="btn btn-primary" disabled>Register →</button>
+        </div>
+      </section>
+
+      <!-- Notification area -->
+      <div id="notification" class="notification hidden"></div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; 2024 FaceAuth — Student Face Verification System</p>
+  </footer>
+
+  <script>
+    const API_BASE = window.API_BASE || 'http://localhost:5000';
+    const MAX_CAPTURES = 5;
+    const MIN_CAPTURES = 3;
+
+    let capturedImages = [];
+    let formData = {};
+    let stream = null;
+    let modelsLoaded = false;
+
+    // ── Step navigation ──────────────────────────────────────────────────────
+    function showStep(stepId) {
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+      document.getElementById(stepId).classList.add('active');
+    }
+
+    // ── Info form ────────────────────────────────────────────────────────────
+    document.getElementById('infoForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const sid = document.getElementById('studentId').value.trim();
+      const nm  = document.getElementById('name').value.trim();
+      const em  = document.getElementById('email').value.trim();
+      const pw  = document.getElementById('password').value;
+
+      if (!sid || !nm || !em || pw.length < 8) {
+        showNotification('Please fill all fields correctly (password ≥ 8 chars).', 'error');
+        return;
+      }
+      formData = { student_id: sid, name: nm, email: em, password: pw };
+      showStep('step-face');
+      startCamera();
+    });
+
+    // ── Camera ───────────────────────────────────────────────────────────────
+    async function startCamera() {
+      const video = document.getElementById('video');
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = stream;
+        await loadModels();
+        detectFaceLoop();
+      } catch (err) {
+        showNotification('Could not access camera: ' + err.message, 'error');
+      }
+    }
+
+    async function loadModels() {
+      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+      try {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        ]);
+        modelsLoaded = true;
+      } catch (_) {
+        // Models may fail to load in offline environments — allow capture anyway
+        document.getElementById('captureBtn').disabled = false;
+        document.getElementById('faceStatus').textContent = 'Camera ready (model offline)';
+      }
+    }
+
+    async function detectFaceLoop() {
+      const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
+      const status  = document.getElementById('faceStatus');
+      const captureBtn = document.getElementById('captureBtn');
+
+      if (!modelsLoaded) return;
+
+      overlay.width  = video.videoWidth  || 640;
+      overlay.height = video.videoHeight || 480;
+      const ctx = overlay.getContext('2d');
+
+      const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224 });
+
+      const loop = async () => {
+        if (!video.srcObject) return;
+        const detections = await faceapi.detectAllFaces(video, options);
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (detections.length > 0) {
+          const box = detections[0].box;
+          ctx.strokeStyle = '#22c55e';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+          status.textContent = '✅ Face detected — ready to capture';
+          status.className = 'face-status success';
+          captureBtn.disabled = capturedImages.length >= MAX_CAPTURES;
+        } else {
+          status.textContent = '🔍 Looking for face…';
+          status.className = 'face-status';
+          captureBtn.disabled = true;
+        }
+        requestAnimationFrame(loop);
+      };
+      video.addEventListener('loadeddata', loop, { once: true });
+    }
+
+    // ── Capture ──────────────────────────────────────────────────────────────
+    document.getElementById('captureBtn').addEventListener('click', () => {
+      if (capturedImages.length >= MAX_CAPTURES) return;
+      const video  = document.getElementById('video');
+      const canvas = document.createElement('canvas');
+      canvas.width  = video.videoWidth  || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      capturedImages.push(dataUrl.split(',')[1]); // base64 only
+      renderPreviews();
+      updateCaptureCount();
+    });
+
+    function renderPreviews() {
+      const grid = document.getElementById('previews');
+      grid.innerHTML = capturedImages.map((b64, i) =>
+        `<div class="preview-item">
+          <img src="data:image/jpeg;base64,${b64}" alt="Capture ${i+1}" />
+          <button class="remove-btn" data-index="${i}">✕</button>
+        </div>`
+      ).join('');
+      grid.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          capturedImages.splice(parseInt(btn.dataset.index), 1);
+          renderPreviews();
+          updateCaptureCount();
+        });
+      });
+    }
+
+    function updateCaptureCount() {
+      document.getElementById('captureCount').textContent = `${capturedImages.length} / ${MAX_CAPTURES} captured`;
+      document.getElementById('submitBtn').disabled = capturedImages.length < MIN_CAPTURES;
+      document.getElementById('captureBtn').disabled = capturedImages.length >= MAX_CAPTURES;
+    }
+
+    // ── Back button ──────────────────────────────────────────────────────────
+    document.getElementById('backBtn').addEventListener('click', () => {
+      stopCamera();
+      capturedImages = [];
+      renderPreviews();
+      updateCaptureCount();
+      showStep('step-info');
+    });
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+    }
+
+    // ── Submit registration ──────────────────────────────────────────────────
+    document.getElementById('submitBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Registering…';
+
+      const payload = { ...formData, face_images: capturedImages };
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (res.ok) {
+          localStorage.setItem('token', json.token);
+          showNotification('Registration successful! Redirecting…', 'success');
+          stopCamera();
+          setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
+        } else {
+          showNotification(json.error || 'Registration failed.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Register →';
+        }
+      } catch (err) {
+        showNotification('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Register →';
+      }
+    });
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    function showNotification(msg, type = 'info') {
+      const el = document.getElementById('notification');
+      el.textContent = msg;
+      el.className = `notification ${type}`;
+      setTimeout(() => { el.className = 'notification hidden'; }, 5000);
+    }
+  </script>
+</body>
+</html>

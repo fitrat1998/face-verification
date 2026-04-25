@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard - FaceAuth</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎓 FaceAuth</div>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><span id="navName" class="nav-user"></span></li>
+      <li><button id="logoutBtn" class="btn btn-sm btn-secondary">Logout</button></li>
+    </ul>
+  </nav>
+
+  <main class="dashboard-main">
+    <!-- Profile Section -->
+    <section class="dashboard-section card">
+      <h2>👤 Profile</h2>
+      <div id="profileContent" class="profile-grid">
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line"></div>
+      </div>
+      <div class="profile-actions">
+        <button id="moodleBtn" class="btn btn-primary">Open Moodle →</button>
+        <button id="updateFaceBtn" class="btn btn-secondary">Re-register Face</button>
+      </div>
+    </section>
+
+    <!-- Face Re-registration modal -->
+    <div id="faceModal" class="modal hidden">
+      <div class="modal-box">
+        <h3>Re-register Face</h3>
+        <p class="hint">Capture 3–5 new photos from different angles.</p>
+        <div class="camera-container">
+          <video id="modalVideo" autoplay muted playsinline></video>
+          <canvas id="modalOverlay"></canvas>
+          <div id="modalStatus" class="face-status">Starting…</div>
+        </div>
+        <div class="capture-controls">
+          <button id="modalCaptureBtn" class="btn btn-primary" disabled>📸 Capture</button>
+          <span id="modalCount">0 / 5</span>
+        </div>
+        <div id="modalPreviews" class="preview-grid"></div>
+        <div class="modal-actions">
+          <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
+          <button id="modalSaveBtn" class="btn btn-primary" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Login History Section -->
+    <section class="dashboard-section card">
+      <h2>📋 Login History</h2>
+      <div class="table-wrapper">
+        <table id="historyTable">
+          <thead>
+            <tr>
+              <th>Date &amp; Time</th>
+              <th>Status</th>
+              <th>Face Score</th>
+              <th>IP Address</th>
+              <th>Logout</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody">
+            <tr><td colspan="5" class="text-center">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; 2024 FaceAuth — Student Face Verification System</p>
+  </footer>
+
+  <script>
+    const API_BASE = window.API_BASE || 'http://localhost:5000';
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      window.location.href = 'login.html';
+    }
+
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    };
+
+    // ── Load profile ─────────────────────────────────────────────────────────
+    async function loadProfile() {
+      try {
+        const res = await fetch(`${API_BASE}/api/student/profile`, { headers: authHeaders });
+        if (res.status === 401) { window.location.href = 'login.html'; return; }
+        const json = await res.json();
+        const s = json.student;
+        document.getElementById('navName').textContent = s.name;
+        document.getElementById('profileContent').innerHTML = `
+          <div class="profile-field"><span class="label">Student ID</span><span>${s.student_id}</span></div>
+          <div class="profile-field"><span class="label">Name</span><span>${s.name}</span></div>
+          <div class="profile-field"><span class="label">Email</span><span>${s.email}</span></div>
+          <div class="profile-field"><span class="label">Member Since</span><span>${new Date(s.created_at).toLocaleDateString()}</span></div>
+        `;
+      } catch (err) {
+        console.error('Profile load error:', err);
+      }
+    }
+
+    // ── Load history ─────────────────────────────────────────────────────────
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_BASE}/api/student/login-history`, { headers: authHeaders });
+        const json = await res.json();
+        const tbody = document.getElementById('historyBody');
+        if (!json.history || json.history.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center">No login records found.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = json.history.map(log => `
+          <tr>
+            <td>${new Date(log.login_time).toLocaleString()}</td>
+            <td><span class="badge badge-${log.status}">${log.status}</span></td>
+            <td>${log.face_match_score !== null ? (1 - log.face_match_score).toFixed(2) : '—'}</td>
+            <td>${log.ip_address || '—'}</td>
+            <td>${log.logout_time ? new Date(log.logout_time).toLocaleString() : '—'}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error('History load error:', err);
+      }
+    }
+
+    // ── Logout ───────────────────────────────────────────────────────────────
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      try {
+        await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', headers: authHeaders });
+      } catch (_) {}
+      localStorage.removeItem('token');
+      window.location.href = 'login.html';
+    });
+
+    // ── Moodle button ────────────────────────────────────────────────────────
+    document.getElementById('moodleBtn').addEventListener('click', async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/moodle/login-url`, { headers: authHeaders });
+        const json = await res.json();
+        if (json.login_url) {
+          window.open(json.login_url, '_blank', 'noopener');
+        } else {
+          alert(json.error || 'Moodle integration not configured.');
+        }
+      } catch (err) {
+        alert('Network error: ' + err.message);
+      }
+    });
+
+    // ── Face Re-registration ─────────────────────────────────────────────────
+    let modalStream = null;
+    let modalCaptures = [];
+    const MAX_CAPTURES = 5;
+    const MIN_CAPTURES = 3;
+    let modalModelsLoaded = false;
+
+    document.getElementById('updateFaceBtn').addEventListener('click', () => {
+      document.getElementById('faceModal').classList.remove('hidden');
+      startModalCamera();
+    });
+
+    document.getElementById('modalCancelBtn').addEventListener('click', () => {
+      stopModalCamera();
+      modalCaptures = [];
+      document.getElementById('faceModal').classList.add('hidden');
+    });
+
+    async function startModalCamera() {
+      const video = document.getElementById('modalVideo');
+      try {
+        modalStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = modalStream;
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+        if (!modalModelsLoaded) {
+          try {
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            modalModelsLoaded = true;
+          } catch (_) {
+            document.getElementById('modalCaptureBtn').disabled = false;
+            document.getElementById('modalStatus').textContent = 'Camera ready (model offline)';
+            return;
+          }
+        }
+        runModalDetection();
+      } catch (err) {
+        alert('Camera error: ' + err.message);
+      }
+    }
+
+    async function runModalDetection() {
+      const video = document.getElementById('modalVideo');
+      const overlay = document.getElementById('modalOverlay');
+      const status = document.getElementById('modalStatus');
+      const captureBtn = document.getElementById('modalCaptureBtn');
+      overlay.width = video.videoWidth || 640;
+      overlay.height = video.videoHeight || 480;
+      const ctx = overlay.getContext('2d');
+      const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224 });
+      const loop = async () => {
+        if (!video.srcObject) return;
+        const d = await faceapi.detectAllFaces(video, options);
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        if (d.length > 0) {
+          const b = d[0].box;
+          ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 3;
+          ctx.strokeRect(b.x, b.y, b.width, b.height);
+          status.textContent = '✅ Face detected';
+          status.className = 'face-status success';
+          captureBtn.disabled = modalCaptures.length >= MAX_CAPTURES;
+        } else {
+          status.textContent = '🔍 Looking for face…';
+          status.className = 'face-status';
+          captureBtn.disabled = true;
+        }
+        requestAnimationFrame(loop);
+      };
+      video.addEventListener('loadeddata', loop, { once: true });
+    }
+
+    document.getElementById('modalCaptureBtn').addEventListener('click', () => {
+      const video = document.getElementById('modalVideo');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      modalCaptures.push(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+      document.getElementById('modalCount').textContent = `${modalCaptures.length} / ${MAX_CAPTURES}`;
+      document.getElementById('modalSaveBtn').disabled = modalCaptures.length < MIN_CAPTURES;
+      document.getElementById('modalCaptureBtn').disabled = modalCaptures.length >= MAX_CAPTURES;
+      renderModalPreviews();
+    });
+
+    function renderModalPreviews() {
+      document.getElementById('modalPreviews').innerHTML = modalCaptures.map((b64, i) =>
+        `<div class="preview-item"><img src="data:image/jpeg;base64,${b64}" alt="${i+1}" /></div>`
+      ).join('');
+    }
+
+    document.getElementById('modalSaveBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('modalSaveBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const res = await fetch(`${API_BASE}/api/student/update-face`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ face_images: modalCaptures }),
+        });
+        const json = await res.json();
+        if (res.ok) {
+          alert('Face data updated successfully!');
+          stopModalCamera();
+          modalCaptures = [];
+          document.getElementById('faceModal').classList.add('hidden');
+        } else {
+          alert(json.error || 'Update failed.');
+          btn.disabled = false;
+          btn.textContent = 'Save';
+        }
+      } catch (err) {
+        alert('Network error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    });
+
+    function stopModalCamera() {
+      if (modalStream) {
+        modalStream.getTracks().forEach(t => t.stop());
+        modalStream = null;
+        document.getElementById('modalVideo').srcObject = null;
+      }
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    loadProfile();
+    loadHistory();
+  </script>
+</body>
+</html>

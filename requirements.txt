@@ -1,0 +1,14 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-JWT-Extended==4.6.0
+Flask-Cors==4.0.1
+Flask-Limiter==3.8.0
+bcrypt==4.1.3
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
+requests==2.32.3
+numpy==1.26.4
+Pillow==10.4.0
+# face_recognition requires cmake + dlib (installed separately in Docker)
+face_recognition==1.3.0
+cryptography==42.0.8

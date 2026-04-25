@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: face_verification
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/face_verification
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-change-me-in-production}"
+      JWT_EXPIRY_HOURS: "1"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      MOODLE_BASE_URL: "${MOODLE_BASE_URL:-}"
+      MOODLE_CLIENT_ID: "${MOODLE_CLIENT_ID:-}"
+      MOODLE_CLIENT_SECRET: "${MOODLE_CLIENT_SECRET:-}"
+      MOODLE_REDIRECT_URI: "${MOODLE_REDIRECT_URI:-}"
+      MOODLE_WSTOKEN: "${MOODLE_WSTOKEN:-}"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
