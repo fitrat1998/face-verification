@@ -424,26 +424,24 @@
   const mFace      = document.getElementById('mFace');
 
   /* ───── State ───── */
-  let faceMesh, camera;
+  let faceMesh = null, camera = null;
   let running   = false;
   let completed = false;
 
   let blinkCount = 0;
   let nodCount   = 0;
-  let faceSec    = 0;        // seconds face visible
-  let faceFrames = 0;        // raw frame counter → converted to seconds @~30fps
+  let faceSec    = 0;
+  let faceFrames = 0;
 
   let eyeClosed   = false;
   let lastNoseY   = null;
   let nodCooldown = false;
 
-  let currentStep = -1;      // -1 = not started
+  let currentStep = -1;
 
-  /* ───── Landmark indices ───── */
   const LEFT_EYE  = [362, 385, 387, 263, 373, 380];
   const RIGHT_EYE = [33,  160, 158, 133, 153, 144];
 
-  /* ───── Helpers ───── */
   function log(msg, color) {
     logBox.innerHTML = `<span style="color:${color||'#6b7280'}">${msg}</span>`;
   }
@@ -459,15 +457,14 @@
     return (v1 + v2) / (2.0 * h);
   }
 
-  /* ───── UI helpers ───── */
   function setStepState(idx, state) {
     const el = document.getElementById('s' + idx);
-    el.className = 'step-item ' + (state || '');
+    if(el) el.className = 'step-item ' + (state || '');
   }
 
   function setStepProg(idx, val, max, unit) {
     const el = document.getElementById('sp' + idx);
-    el.textContent = val + '/' + max + (unit||'');
+    if(el) el.textContent = val + '/' + max + (unit||'');
   }
 
   function updateMetrics() {
@@ -492,7 +489,6 @@
     else             scoreFill.style.background = '#6b7280';
   }
 
-  /* ───── Step logic ───── */
   function advanceStep() {
     if (currentStep === 0 && blinkCount >= 3) {
       setStepState(0, 'done');
@@ -512,17 +508,16 @@
       setStepState(2, 'done');
       currentStep = 3;
       camHint.textContent = 'Tahlil qilinmoqda...';
-      setTimeout(() => finishLiveness(), 600);
+      finishLiveness();
     }
   }
 
-  /* ───── MediaPipe callback ───── */
   function onResults(results) {
+    if (!running || completed) return;
+
     overlay.width  = video.videoWidth  || 640;
     overlay.height = video.videoHeight || 480;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-    if (!running || completed) return;
 
     const faces = results.multiFaceLandmarks;
     if (!faces || faces.length === 0) {
@@ -534,12 +529,10 @@
     faceRing.className = 'face-ring detected';
     const lm = faces[0];
 
-    /* Face presence — ~30fps → accumulate */
     faceFrames++;
     faceSec = faceFrames / 30;
     if (currentStep === 2) setStepProg(2, Math.min(Math.round(faceSec), 5), 5, 's');
 
-    /* Blink — EAR */
     const earL = getEAR(lm, LEFT_EYE);
     const earR = getEAR(lm, RIGHT_EYE);
     const ear  = (earL + earR) / 2;
@@ -555,7 +548,6 @@
       }
     }
 
-    /* Nod — nose Y delta */
     const noseY = lm[4].y;
     if (lastNoseY !== null && !nodCooldown && currentStep === 1) {
       const delta = noseY - lastNoseY;
@@ -574,54 +566,72 @@
     advanceStep();
   }
 
-  /* ───── Finish ───── */
-function finishLiveness() {
+  /* ───── Finish — BU YER TUZATILDI ───── */
+  function finishLiveness() {
+    if (completed) return;
     completed = true;
     running = false;
-    const score = computeScore();
-    const passed = score >= 70; // Agar ko'z qisish va bosh harakati o'xshagan bo'lsa
 
-    if (passed) {
-        log("Hayotiylik tasdiqlandi. Endi shaxsni aniqlaymiz...", "#60a5fa");
+    if (camera) { camera.stop(); }
 
-        // Kameradan hozirgi kadrni kesib olamiz
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
+    log("Hayotiylik tasdiqlandi. Rasmingiz backendga yuborilmoqda...", "#60a5fa");
 
-        // Rasmni backendga (Python) yuboramiz
-        canvas.toBlob(async (blob) => {
-            const fd = new FormData();
-            fd.append('file', blob, 'webcam.jpg');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const canvasCtx = canvas.getContext('2d');
 
-            try {
-                const response = await fetch('http://127.0.0.1:8000/verify', {
-                    method: 'POST',
-                    body: fd
-                });
-                const data = await response.json();
+    // Oyna teskari (mirror) bo'lgani uchun to'g'rilab kesib olamiz
+    canvasCtx.translate(canvas.width, 0);
+    canvasCtx.scale(-1, 1);
+    canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                if (data.status === "success") {
-                    resultBox.className = 'result-box success';
-                    resultBox.textContent = `Xush kelibsiz, ${data.user}! Moslik: ${data.confidence}`;
-                    log(`✓ ${data.user} ekanligingiz tasdiqlandi!`, "#4ade80");
-                } else {
-                    resultBox.className = 'result-box fail';
-                    resultBox.textContent = "Yuz bazadagi rasmga mos kelmadi!";
-                    log("✗ Tanimadim. Bazadagi rasm bilan farq juda katta.", "#f87171");
-                }
-            } catch (err) {
-                log("Backend bilan aloqa yo'q!", "#ef4444");
+    canvas.toBlob(async (blob) => {
+        if (!blob) {
+            log("Xato: Rasmni yuklab bo'lmadi.", "#ef4444");
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('file', blob, 'webcam.jpg');
+
+        try {
+            // Slesh (/) belgilari va manzil aniqlashtirildi
+<!--            const response = await fetch('http://localhost:8000/verify', {-->
+            const response = await fetch('https://auth.digitaliz.uz/verify', {
+                method: 'POST',
+                body: fd
+            });
+
+            if (!response.ok) {
+               throw new Error(`Server xatosi: ${response.status}`);
             }
-        }, 'image/jpeg');
-    }
-}
+
+            const data = await response.json();
+
+            if (data.status === "success") {
+                resultBox.className = 'result-box success';
+                resultBox.textContent = `Xush kelibsiz, ${data.user}! Moslik: ${data.confidence}`;
+                log(`✓ ${data.user} ekanligingiz tasdiqlandi!`, "#4ade80");
+                faceRing.className = 'face-ring success';
+            } else {
+                resultBox.className = 'result-box fail';
+                resultBox.textContent = data.message || "Yuz mos kelmadi!";
+                log("✗ Tanimadim. Bazadagi rasm bilan farq juda katta.", "#f87171");
+                faceRing.className = 'face-ring fail';
+            }
+        } catch (err) {
+            console.error(err);
+            log(`Backend bilan aloqa yo'q! (${err.message})`, "#ef4444");
+            resultBox.className = 'result-box fail';
+            resultBox.textContent = "Server bilan bog'lanishda xatolik!";
+        }
+    }, 'image/jpeg', 0.95);
+  }
 
   /* ───── Start ───── */
   async function startLiveness() {
     btnStart.disabled   = true;
-    btnStart.textContent = 'Boshlash';
     completed = false;
     running   = false;
     blinkCount = 0; nodCount = 0; faceFrames = 0; faceSec = 0;
@@ -638,58 +648,55 @@ function finishLiveness() {
     setStepProg(0, 0, 3); setStepProg(1, 0, 2); setStepProg(2, 0, 5, 's');
     updateMetrics();
 
-    log('Kamera yoqilmoqda...', '#6b7280');
-    camHint.textContent = 'Kamera yoqilmoqda...';
+    log('Kamera va modellar tayyorlanmoqda...', '#6b7280');
+    camHint.textContent = 'Yuklanmoqda...';
 
-    /* Camera */
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' }
-      });
-      video.srcObject = stream;
-      await new Promise(r => video.onloadedmetadata = r);
-      await video.play();
-    } catch (e) {
-      log('Kamera xatosi: ' + e.message, '#f87171');
-      btnStart.disabled = false;
-      return;
-    }
-
-    /* FaceMesh */
+    // Model faqat bir marta yuklanadi
     if (!faceMesh) {
-      log('FaceMesh modeli yuklanmoqda...', '#6b7280');
       faceMesh = new FaceMesh({
         locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
       });
       faceMesh.setOptions({
         maxNumFaces: 1,
         refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
       });
       faceMesh.onResults(onResults);
     }
 
-    camera = new Camera(video, {
-      onFrame: async () => { if (faceMesh && running) await faceMesh.send({ image: video }); },
-      width: 640, height: 480
-    });
+    try {
+      // MediaPipe-ga kamerani boshqarishni topshiramiz (Ziddiyat bartaraf etildi)
+      if (!camera) {
+        camera = new Camera(video, {
+          onFrame: async () => {
+            if (running && faceMesh) {
+              await faceMesh.send({ image: video });
+            }
+          },
+          width: 640,
+          height: 480
+        });
+      }
 
-    running = true;
-    setStepState(0, 'active');
-    camHint.textContent = 'Ko\'zingizni qisib-oching (3 marta)';
-    log('Boshlandi. Ko\'zingizni qisib-oching!', '#60a5fa');
-    camera.start();
+      await camera.start();
+      running = true;
+      setStepState(0, 'active');
+      camHint.textContent = 'Ko\'zingizni qisib-oching (3 marta)';
+      log('Boshlandi. Ko\'zingizni qisib-oching!', '#60a5fa');
+
+    } catch (e) {
+      log('Kamera yoqishda xatolik: ' + e.message, '#f87171');
+      btnStart.disabled = false;
+    }
   }
 
   /* ───── Reset ───── */
   function resetAll() {
-    if (camera) { camera.stop(); camera = null; }
-    if (video.srcObject) {
-      video.srcObject.getTracks().forEach(t => t.stop());
-      video.srcObject = null;
-    }
-    running = false; completed = false;
+    running = false;
+    completed = false;
+    if (camera) { camera.stop(); }
+
     blinkCount = 0; nodCount = 0; faceFrames = 0; faceSec = 0;
     eyeClosed  = false; lastNoseY = null; nodCooldown = false;
     currentStep = -1;
@@ -700,7 +707,6 @@ function finishLiveness() {
     scorePct.textContent  = '0%';
     camHint.textContent   = 'Kamera yoqilmagan';
     btnStart.disabled     = false;
-    btnStart.textContent  = 'Boshlash';
 
     for (let i = 0; i < 3; i++) { setStepState(i, ''); }
     setStepProg(0, 0, 3); setStepProg(1, 0, 2); setStepProg(2, 0, 5, 's');
