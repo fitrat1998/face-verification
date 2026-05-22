@@ -1,720 +1,629 @@
 <!DOCTYPE html>
 <html lang="uz">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hayotiylikni Tekshirish</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yuz Tanish — Liveness</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080c12;--surface:#0f1520;--border:#1e2d45;
+  --accent:#00e5ff;--accent2:#7c3aed;
+  --ok:#00e676;--err:#ff1744;--warn:#ffab00;
+  --text:#e2e8f0;--muted:#4a6080;
+}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+.wrap{position:relative;z-index:1;width:100%;max-width:520px}
+header{text-align:center;margin-bottom:24px}
+.logo{font-size:10px;font-family:'Space Mono',monospace;color:var(--accent);letter-spacing:4px;text-transform:uppercase;margin-bottom:8px;opacity:.7}
+h1{font-size:28px;font-weight:800;letter-spacing:-1px}
+h1 span{color:var(--accent)}
 
-    body {
-      font-family: 'Manrope', sans-serif;
-      background: #0f1117;
-      color: #e8e9ed;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px;
-    }
+/* API bar */
+.api-bar{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.api-bar span{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);white-space:nowrap}
+.api-bar input{flex:1;padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Space Mono',monospace;font-size:11px;outline:none}
+.api-bar input:focus{border-color:var(--accent)}
 
-    .container {
-      width: 100%;
-      max-width: 520px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+/* Camera */
+.cam-wrap{position:relative;width:100%;aspect-ratio:4/3;background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:12px}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#overlay{pointer-events:none}
 
-    .header {
-      text-align: center;
-    }
-    .header h1 {
-      font-size: 26px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      color: #fff;
-    }
-    .header p {
-      font-size: 13px;
-      color: #6b7280;
-      margin-top: 6px;
-    }
-    .badge {
-      display: inline-block;
-      background: #1a2a1a;
-      color: #4ade80;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 3px 10px;
-      border-radius: 20px;
-      border: 1px solid #166534;
-      margin-bottom: 12px;
-      font-family: 'JetBrains Mono', monospace;
-    }
+/* Corners */
+.corner{position:absolute;width:22px;height:22px;border-color:var(--accent);border-style:solid;z-index:10;opacity:.6}
+.corner.tl{top:10px;left:10px;border-width:2px 0 0 2px;border-radius:4px 0 0 0}
+.corner.tr{top:10px;right:10px;border-width:2px 2px 0 0;border-radius:0 4px 0 0}
+.corner.bl{bottom:10px;left:10px;border-width:0 0 2px 2px;border-radius:0 0 0 4px}
+.corner.br{bottom:10px;right:10px;border-width:0 2px 2px 0;border-radius:0 0 4px 0}
 
-    .cam-card {
-      background: #161b27;
-      border: 1px solid #1e2535;
-      border-radius: 20px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-    }
+/* Face oval */
+.face-guide{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;pointer-events:none}
+.face-oval{width:160px;height:200px;border:2px dashed rgba(0,229,255,0.2);border-radius:50%;transition:border-color .3s,border-style .3s}
+.state-scan .face-oval{border-color:rgba(0,229,255,.6);border-style:dashed;animation:pulse-oval 1.5s ease-in-out infinite}
+.state-ok .face-oval{border-color:var(--ok);border-style:solid}
+.state-err .face-oval{border-color:var(--err);border-style:solid}
+@keyframes pulse-oval{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.03);opacity:1}}
 
-    .video-wrap {
-      position: relative;
-      width: 100%;
-      border-radius: 14px;
-      overflow: hidden;
-      background: #0a0c12;
-      aspect-ratio: 4/3;
-    }
+/* Scanline */
+.scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;z-index:9}
+.state-scan .scanline{opacity:.5;animation:scan 1.5s ease-in-out infinite}
+@keyframes scan{0%{top:10%}50%{top:88%}100%{top:10%}}
 
-    #video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1);
-      display: block;
-    }
+/* Steps */
+.steps{display:flex;gap:8px;margin-bottom:12px}
+.step{flex:1;padding:10px 8px;background:var(--surface);border:1px solid var(--border);border-radius:10px;text-align:center;transition:all .3s}
+.step .s-icon{font-size:18px;margin-bottom:4px}
+.step .s-label{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.step.active{border-color:var(--accent);background:rgba(0,229,255,.06)}
+.step.active .s-label{color:var(--accent)}
+.step.done{border-color:var(--ok);background:rgba(0,230,118,.06)}
+.step.done .s-label{color:var(--ok)}
 
-    #overlay {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-      transform: scaleX(-1);
-    }
+/* Instruction box */
+.instr{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;min-height:52px;transition:border-color .3s}
+.instr.active{border-color:var(--accent)}
+.instr.ok{border-color:var(--ok)}
+.instr.err{border-color:var(--err)}
+.instr-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:background .3s}
+.instr.active .instr-dot{background:var(--accent);animation:blink .8s infinite}
+.instr.ok .instr-dot{background:var(--ok)}
+.instr.err .instr-dot{background:var(--err)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.instr-text{flex:1;font-family:'Space Mono',monospace;font-size:12px}
+.instr-timer{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
 
-    .face-ring {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 54%;
-      height: 70%;
-      border-radius: 50%;
-      border: 2px dashed rgba(255,255,255,0.2);
-      pointer-events: none;
-      transition: border-color 0.3s, box-shadow 0.3s;
-    }
-    .face-ring.detected {
-      border-style: solid;
-      border-color: #22c55e;
-    }
-    .face-ring.success {
-      border-color: #22c55e;
-      box-shadow: 0 0 0 6px rgba(34,197,94,0.15);
-    }
-    .face-ring.fail {
-      border-color: #ef4444;
-      box-shadow: 0 0 0 6px rgba(239,68,68,0.15);
-    }
+/* Progress bar */
+.prog-wrap{height:3px;background:var(--border);border-radius:2px;margin-bottom:12px;overflow:hidden}
+.prog-bar{height:100%;background:var(--accent);border-radius:2px;transition:width .1s linear}
 
-    /* Corner accents on ring */
-    .face-ring::before, .face-ring::after {
-      content: '';
-      position: absolute;
-      width: 16px; height: 16px;
-      border-color: inherit;
-      border-style: solid;
-    }
-    .face-ring::before { top: -2px; left: -2px; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
-    .face-ring::after  { bottom: -2px; right: -2px; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+/* Result */
+.result{display:none;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;font-family:'Space Mono',monospace;font-size:12px}
+.result.show{display:block}
+.result.ok{border-color:var(--ok)}
+.result.err{border-color:var(--err)}
+.result-name{font-size:20px;font-family:'Syne',sans-serif;font-weight:800;margin-bottom:6px}
+.result.ok .result-name{color:var(--ok)}
+.result.err .result-name{color:var(--err)}
+.result-meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted)}
+.result-meta span{color:var(--text);margin-left:4px}
 
-    .cam-hint {
-      position: absolute;
-      bottom: 10px; left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.65);
-      color: #e8e9ed;
-      font-size: 12px;
-      padding: 5px 14px;
-      border-radius: 20px;
-      white-space: nowrap;
-      backdrop-filter: blur(6px);
-      pointer-events: none;
-    }
+/* Buttons */
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+button{padding:13px;border:none;border-radius:10px;font-family:'Syne',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s}
+.btn-start{background:var(--accent);color:#000;grid-column:span 2}
+.btn-start:hover{filter:brightness(1.1)}
+.btn-start:disabled{opacity:.4;cursor:not-allowed}
+.btn-sec{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.btn-sec:hover{border-color:var(--accent);color:var(--accent)}
 
-    /* Steps */
-    .steps {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .step-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      background: #1a2030;
-      border: 1px solid #1e2535;
-      border-radius: 12px;
-      padding: 10px 14px;
-      transition: border-color 0.3s, background 0.3s;
-    }
-    .step-item.active {
-      background: #1a2535;
-      border-color: #3b82f6;
-    }
-    .step-item.done {
-      background: #0d1f0d;
-      border-color: #166534;
-    }
-    .step-item.fail {
-      background: #1f0d0d;
-      border-color: #7f1d1d;
-    }
-    .step-dot {
-      width: 32px; height: 32px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 15px;
-      flex-shrink: 0;
-      background: #0f1117;
-      border: 1px solid #2d3748;
-      transition: background 0.3s;
-    }
-    .step-item.active .step-dot { background: #1e3a5f; border-color: #3b82f6; }
-    .step-item.done  .step-dot { background: #14532d; border-color: #22c55e; }
-    .step-item.fail  .step-dot { background: #7f1d1d; border-color: #ef4444; }
-    .step-text { flex: 1; }
-    .step-name {
-      font-size: 13px; font-weight: 600;
-      color: #e8e9ed;
-    }
-    .step-item.done  .step-name { color: #86efac; }
-    .step-item.fail  .step-name { color: #fca5a5; }
-    .step-desc { font-size: 11px; color: #6b7280; margin-top: 2px; }
-    .step-prog {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      font-weight: 600;
-      color: #6b7280;
-    }
-    .step-item.active .step-prog { color: #60a5fa; }
-    .step-item.done  .step-prog { color: #4ade80; }
-
-    /* Score */
-    .score-row {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .score-label { font-size: 12px; color: #6b7280; white-space: nowrap; }
-    .score-bar {
-      flex: 1;
-      height: 6px;
-      background: #1e2535;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .score-fill {
-      height: 100%;
-      border-radius: 3px;
-      background: #3b82f6;
-      transition: width 0.4s, background 0.3s;
-      width: 0%;
-    }
-    .score-pct {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-      font-weight: 600;
-      color: #e8e9ed;
-      min-width: 36px;
-      text-align: right;
-    }
-
-    /* Result */
-    .result-box {
-      display: none;
-      width: 100%;
-      padding: 14px 18px;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: 600;
-      text-align: center;
-      border: 1px solid;
-    }
-    .result-box.success {
-      display: block;
-      background: #0d1f0d;
-      border-color: #166534;
-      color: #4ade80;
-    }
-    .result-box.fail {
-      display: block;
-      background: #1f0d0d;
-      border-color: #7f1d1d;
-      color: #f87171;
-    }
-
-    /* Metrics */
-    .metrics {
-      width: 100%;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-    }
-    .metric {
-      background: #1a2030;
-      border: 1px solid #1e2535;
-      border-radius: 10px;
-      padding: 10px;
-      text-align: center;
-    }
-    .metric-val {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 22px;
-      font-weight: 600;
-      color: #fff;
-    }
-    .metric-lbl { font-size: 10px; color: #6b7280; margin-top: 3px; }
-
-    /* Buttons */
-    .btn-row {
-      width: 100%;
-      display: flex;
-      gap: 10px;
-    }
-    .btn {
-      flex: 1;
-      padding: 13px 0;
-      border-radius: 12px;
-      font-family: 'Manrope', sans-serif;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      border: 1px solid #1e2535;
-      background: #1a2030;
-      color: #e8e9ed;
-      transition: background 0.2s, transform 0.1s, opacity 0.2s;
-    }
-    .btn:hover { background: #1e2535; }
-    .btn:active { transform: scale(0.98); }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-    .btn.primary {
-      background: #1d4ed8;
-      border-color: transparent;
-      color: #fff;
-    }
-    .btn.primary:hover { background: #1e40af; }
-
-    /* Log */
-    .log-box {
-      width: 100%;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: #4b5563;
-      background: #0d1117;
-      border: 1px solid #1e2535;
-      border-radius: 10px;
-      padding: 10px 12px;
-      line-height: 1.6;
-      min-height: 36px;
-    }
-    .log-box span { color: #6b7280; }
-  </style>
+/* DB */
+.db-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
+.db-title{font-size:10px;font-family:'Space Mono',monospace;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+.db-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:28px}
+.chip{padding:3px 10px;background:rgba(0,229,255,.07);border:1px solid rgba(0,229,255,.2);border-radius:20px;font-family:'Space Mono',monospace;font-size:10px;color:var(--accent)}
+.db-empty{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+.add-form{display:none;flex-wrap:wrap;gap:7px;margin-top:8px}
+.add-form.show{display:flex}
+.add-form input[type=text]{flex:1;min-width:120px;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'Space Mono',monospace;font-size:11px;outline:none}
+.add-form input[type=text]:focus{border-color:var(--accent)}
+.add-form input[type=file]{display:none}
+.file-lbl{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--muted);font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;white-space:nowrap;transition:all .2s}
+.file-lbl:hover{border-color:var(--accent);color:var(--accent)}
+.file-lbl.sel{color:var(--accent);border-color:var(--accent)}
+.btn-add{padding:9px 14px;background:var(--accent2);color:#fff;border-radius:7px;font-family:'Syne',sans-serif;font-weight:700;font-size:12px;cursor:pointer;border:none;transition:all .2s}
+.btn-add:hover{filter:brightness(1.15)}
+.add-msg{width:100%;font-family:'Space Mono',monospace;font-size:10px;display:none;padding-top:4px}
+.add-msg.show{display:block}
+.add-msg.ok{color:var(--ok)}
+.add-msg.err{color:var(--err)}
+</style>
 </head>
 <body>
+<div class="wrap">
+  <header>
+    <div class="logo">◈ FaceID System v3.0</div>
+    <h1>Yuz <span>Tanish</span></h1>
+  </header>
 
-<div class="container">
-  <div class="header">
-    <div class="badge">● MediaPipe · Frontend Only</div>
-    <h1>Hayotiylikni Tekshirish</h1>
-    <p>Backend talab qilinmaydi — brauzerda real vaqtda ishlaydi</p>
+  <div class="api-bar">
+    <span>SERVER:</span>
+    <input type="text" id="apiUrl" value="http://localhost:8000">
   </div>
 
-  <div class="cam-card">
+  <!-- Camera -->
+  <div class="cam-wrap" id="camWrap">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="scanline"></div>
+    <div class="face-guide"><div class="face-oval"></div></div>
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
 
-    <div class="video-wrap">
-      <video id="video" autoplay playsinline muted></video>
-      <canvas id="overlay"></canvas>
-      <div class="face-ring" id="faceRing"></div>
-      <div class="cam-hint" id="camHint">Kamera yoqilmagan</div>
+  <!-- Steps -->
+  <div class="steps" id="stepsRow"></div>
+
+  <!-- Progress -->
+  <div class="prog-wrap"><div class="prog-bar" id="progBar" style="width:0%"></div></div>
+
+  <!-- Instruction -->
+  <div class="instr" id="instrBox">
+    <div class="instr-dot"></div>
+    <div class="instr-text" id="instrText">Boshlash tugmasini bosing</div>
+    <div class="instr-timer" id="instrTimer"></div>
+  </div>
+
+  <!-- Result -->
+  <div class="result" id="resultBox">
+    <div class="result-name" id="rName">—</div>
+    <div class="result-meta">
+      <div>ISHONCH:<span id="rConf">—</span></div>
+      <div>MASOFA:<span id="rDist">—</span></div>
     </div>
+  </div>
 
-    <!-- Steps -->
-    <div class="steps">
-      <div class="step-item" id="s0">
-        <div class="step-dot" id="sd0">👁</div>
-        <div class="step-text">
-          <div class="step-name">Ko'z qimirlatish</div>
-          <div class="step-desc">3 marta ko'z qisib-oching</div>
-        </div>
-        <div class="step-prog" id="sp0">0/3</div>
-      </div>
-      <div class="step-item" id="s1">
-        <div class="step-dot" id="sd1">↕</div>
-        <div class="step-text">
-          <div class="step-name">Bosh harakati</div>
-          <div class="step-desc">2 marta pastga-yuqoriga</div>
-        </div>
-        <div class="step-prog" id="sp1">0/2</div>
-      </div>
-      <div class="step-item" id="s2">
-        <div class="step-dot" id="sd2">🙂</div>
-        <div class="step-text">
-          <div class="step-name">Yuzni ushlab turish</div>
-          <div class="step-desc">Kameraga qarab turing</div>
-        </div>
-        <div class="step-prog" id="sp2">0/5s</div>
-      </div>
+  <!-- Buttons -->
+  <div class="btns">
+    <button class="btn-start" id="btnStart" onclick="startLiveness()">▶ BOSHLASH</button>
+    <button class="btn-sec" onclick="resetAll()">↺ Qayta</button>
+    <button class="btn-sec" onclick="toggleAdd()">+ Foydalanuvchi</button>
+  </div>
+
+  <!-- DB -->
+  <div class="db-box">
+    <div class="db-title">◈ Bazadagi foydalanuvchilar</div>
+    <div class="db-chips" id="dbChips"><span class="db-empty">Yuklanmoqda...</span></div>
+    <div class="add-form" id="addForm">
+      <input type="text" id="newName" placeholder="Ism (ali_raufov)">
+      <label class="file-lbl" id="fileLbl" for="newFile">📎 Rasm</label>
+      <input type="file" id="newFile" accept="image/*" onchange="onFile(this)">
+      <button class="btn-add" onclick="addUser()">Qo'shish</button>
+      <div class="add-msg" id="addMsg"></div>
     </div>
-
-    <!-- Score bar -->
-    <div class="score-row">
-      <div class="score-label">Hayotiylik</div>
-      <div class="score-bar"><div class="score-fill" id="scoreFill"></div></div>
-      <div class="score-pct" id="scorePct">0%</div>
-    </div>
-
-    <!-- Metrics -->
-    <div class="metrics">
-      <div class="metric">
-        <div class="metric-val" id="mBlink">0</div>
-        <div class="metric-lbl">Ko'z qimirlatish</div>
-      </div>
-      <div class="metric">
-        <div class="metric-val" id="mNod">0</div>
-        <div class="metric-lbl">Bosh harakati</div>
-      </div>
-      <div class="metric">
-        <div class="metric-val" id="mFace">0</div>
-        <div class="metric-lbl">Yuz (soniya)</div>
-      </div>
-    </div>
-
-    <!-- Result -->
-    <div class="result-box" id="resultBox"></div>
-
-    <!-- Buttons -->
-    <div class="btn-row">
-      <button class="btn primary" id="btnStart" onclick="startLiveness()">Boshlash</button>
-      <button class="btn" id="btnReset" onclick="resetAll()">Qayta o'rnatish</button>
-    </div>
-
-    <!-- Log -->
-    <div class="log-box" id="logBox"><span>Tizim tayyor. "Boshlash" tugmasini bosing.</span></div>
-
   </div>
 </div>
 
+<canvas id="hiddenCanvas" style="display:none"></canvas>
+
 <script>
-  /* ───── DOM refs ───── */
-  const video      = document.getElementById('video');
-  const overlay    = document.getElementById('overlay');
-  const ctx        = overlay.getContext('2d');
-  const faceRing   = document.getElementById('faceRing');
-  const camHint    = document.getElementById('camHint');
-  const scoreFill  = document.getElementById('scoreFill');
-  const scorePct   = document.getElementById('scorePct');
-  const resultBox  = document.getElementById('resultBox');
-  const logBox     = document.getElementById('logBox');
-  const btnStart   = document.getElementById('btnStart');
-  const mBlink     = document.getElementById('mBlink');
-  const mNod       = document.getElementById('mNod');
-  const mFace      = document.getElementById('mFace');
+// ── Config ──
+const TASKS = [
+  { id:'blink',    label:'Ko\'z\nqimirlat', icon:'👁',  instruction:'Ko\'zingizni yumib oching',      timeout:5000 },
+  { id:'left',     label:'Chapga',          icon:'◀',   instruction:'Boshingizni CHAPGA burting',     timeout:5000 },
+  { id:'right',    label:'O\'ngga',         icon:'▶',   instruction:'Boshingizni O\'NGGA burting',    timeout:5000 },
+  { id:'smile',    label:'Tabassum',        icon:'😊',  instruction:'Tabassum qiling',                timeout:5000 },
+  { id:'nod',      label:'Bosh\nirg\'at',   icon:'↕',   instruction:'Boshingizni PASTGA burting',     timeout:5000 },
+];
 
-  /* ───── State ───── */
-  let faceMesh = null, camera = null;
-  let running   = false;
-  let completed = false;
+function pickTasks(n=3) {
+  const shuffled = [...TASKS].sort(()=>Math.random()-.5);
+  return shuffled.slice(0,n);
+}
 
-  let blinkCount = 0;
-  let nodCount   = 0;
-  let faceSec    = 0;
-  let faceFrames = 0;
+// ── State ──
+let tasks = [];
+let currentStep = -1;
+let stepDone = [];
+let stepTimer = null;
+let progInterval = null;
+let stepStart = 0;
+let faceMeshReady = false;
+let faceMesh = null;
+let lastLandmarks = null;
+let eyeHistory = [];
+let headYawHistory = [];
+let headPitchHistory = [];
+let mouthHistory = [];
+let isRunning = false;
+let verifying = false;
 
-  let eyeClosed   = false;
-  let lastNoseY   = null;
-  let nodCooldown = false;
+// ── Video / Canvas ──
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const hiddenCanvas = document.getElementById('hiddenCanvas');
 
-  let currentStep = -1;
-
-  const LEFT_EYE  = [362, 385, 387, 263, 373, 380];
-  const RIGHT_EYE = [33,  160, 158, 133, 153, 144];
-
-  function log(msg, color) {
-    logBox.innerHTML = `<span style="color:${color||'#6b7280'}">${msg}</span>`;
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}});
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    hiddenCanvas.width = video.videoWidth;
+    hiddenCanvas.height = video.videoHeight;
+    initFaceMesh();
+    loadDb();
+  } catch(e) {
+    setInstr('err','Kamera ochilmadi: '+e.message,'');
   }
+}
 
-  function dist2d(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y);
+// ── FaceMesh ──
+function initFaceMesh() {
+  faceMesh = new FaceMesh({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  faceMesh.setOptions({maxNumFaces:1, refineLandmarks:true, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
+  faceMesh.onResults(onResults);
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await faceMesh.send({image: video}); },
+    width:640, height:480
+  });
+  cam.start();
+  faceMeshReady = true;
+}
+
+function onResults(results) {
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+
+  if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+    lastLandmarks = null;
+    return;
   }
+  lastLandmarks = results.multiFaceLandmarks[0];
 
-  function getEAR(lm, idx) {
-    const v1 = dist2d(lm[idx[1]], lm[idx[5]]);
-    const v2 = dist2d(lm[idx[2]], lm[idx[4]]);
-    const h  = dist2d(lm[idx[0]], lm[idx[3]]);
-    return (v1 + v2) / (2.0 * h);
-  }
-
-  function setStepState(idx, state) {
-    const el = document.getElementById('s' + idx);
-    if(el) el.className = 'step-item ' + (state || '');
-  }
-
-  function setStepProg(idx, val, max, unit) {
-    const el = document.getElementById('sp' + idx);
-    if(el) el.textContent = val + '/' + max + (unit||'');
-  }
-
-  function updateMetrics() {
-    mBlink.textContent = blinkCount;
-    mNod.textContent   = nodCount;
-    mFace.textContent  = Math.round(faceSec) + 's';
-  }
-
-  function computeScore() {
-    const s = Math.min(blinkCount/3, 1)*35 +
-              Math.min(nodCount/2,   1)*30 +
-              Math.min(faceSec/5,    1)*35;
-    return Math.round(s);
-  }
-
-  function updateScore() {
-    const s = computeScore();
-    scoreFill.style.width = s + '%';
-    scorePct.textContent  = s + '%';
-    if      (s > 70) scoreFill.style.background = '#22c55e';
-    else if (s > 40) scoreFill.style.background = '#3b82f6';
-    else             scoreFill.style.background = '#6b7280';
-  }
-
-  function advanceStep() {
-    if (currentStep === 0 && blinkCount >= 3) {
-      setStepState(0, 'done');
-      setStepProg(0, 3, 3);
-      currentStep = 1;
-      setStepState(1, 'active');
-      camHint.textContent = 'Boshingizni pastga-yuqoriga tebrating';
-      log('✓ Ko\'z qimirlatish tugadi. Endi boshingizni tebrating.', '#60a5fa');
-    } else if (currentStep === 1 && nodCount >= 2) {
-      setStepState(1, 'done');
-      setStepProg(1, 2, 2);
-      currentStep = 2;
-      setStepState(2, 'active');
-      camHint.textContent = 'Kameraga to\'g\'ri qarab turing...';
-      log('✓ Bosh harakati tugadi. Yuzingizni ushlab turing.', '#60a5fa');
-    } else if (currentStep === 2 && faceSec >= 5) {
-      setStepState(2, 'done');
-      currentStep = 3;
-      camHint.textContent = 'Tahlil qilinmoqda...';
-      finishLiveness();
+  // Draw minimal face dots
+  if (isRunning) {
+    ctx.fillStyle = 'rgba(0,229,255,0.4)';
+    for (const lm of lastLandmarks) {
+      ctx.beginPath();
+      ctx.arc(lm.x*overlay.width, lm.y*overlay.height, 1, 0, Math.PI*2);
+      ctx.fill();
     }
   }
 
-  function onResults(results) {
-    if (!running || completed) return;
+  if (!isRunning) return;
+  checkCurrentTask();
+}
 
-    overlay.width  = video.videoWidth  || 640;
-    overlay.height = video.videoHeight || 480;
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
+// ── Task detection ──
+function checkCurrentTask() {
+  if (currentStep < 0 || currentStep >= tasks.length) return;
+  if (stepDone[currentStep]) return;
+  if (!lastLandmarks) return;
 
-    const faces = results.multiFaceLandmarks;
-    if (!faces || faces.length === 0) {
-      faceRing.className = 'face-ring';
-      camHint.textContent = 'Yuzingizni kameraga qarating...';
-      return;
-    }
+  const task = tasks[currentStep];
+  let detected = false;
 
-    faceRing.className = 'face-ring detected';
-    const lm = faces[0];
+  if (task.id === 'blink') detected = detectBlink();
+  else if (task.id === 'left') detected = detectHeadLeft();
+  else if (task.id === 'right') detected = detectHeadRight();
+  else if (task.id === 'smile') detected = detectSmile();
+  else if (task.id === 'nod') detected = detectNod();
 
-    faceFrames++;
-    faceSec = faceFrames / 30;
-    if (currentStep === 2) setStepProg(2, Math.min(Math.round(faceSec), 5), 5, 's');
+  if (detected) completeStep();
+}
 
-    const earL = getEAR(lm, LEFT_EYE);
-    const earR = getEAR(lm, RIGHT_EYE);
-    const ear  = (earL + earR) / 2;
+function getPoint(i) {
+  return lastLandmarks[i];
+}
 
-    if (ear < 0.20 && !eyeClosed) {
-      eyeClosed = true;
-    } else if (ear > 0.25 && eyeClosed) {
-      eyeClosed = false;
-      if (currentStep === 0) {
-        blinkCount++;
-        setStepProg(0, blinkCount, 3);
-        log('Ko\'z qimirlatish #' + blinkCount + ' aniqlandi', '#a78bfa');
-      }
-    }
+function detectBlink() {
+  // EAR (eye aspect ratio) — ikkala ko'z uchun
+  const LEFT_EYE  = [159,145,158,153,160,144];
+  const RIGHT_EYE = [386,374,385,380,387,373];
 
-    const noseY = lm[4].y;
-    if (lastNoseY !== null && !nodCooldown && currentStep === 1) {
-      const delta = noseY - lastNoseY;
-      if (delta > 0.022) {
-        nodCount++;
-        setStepProg(1, nodCount, 2);
-        log('Bosh harakati #' + nodCount + ' aniqlandi', '#34d399');
-        nodCooldown = true;
-        setTimeout(() => { nodCooldown = false; }, 700);
-      }
-    }
-    lastNoseY = noseY;
-
-    updateMetrics();
-    updateScore();
-    advanceStep();
+  function ear(pts) {
+    const [p1,p2,p3,p4,p5,p6] = pts.map(i=>getPoint(i));
+    const a = dist(p2,p6), b = dist(p3,p5), c = dist(p1,p4);
+    return (a+b)/(2*c);
   }
 
-  /* ───── Finish — BU YER TUZATILDI ───── */
-  function finishLiveness() {
-    if (completed) return;
-    completed = true;
-    running = false;
+  const le = ear(LEFT_EYE), re = ear(RIGHT_EYE), avg = (le+re)/2;
+  eyeHistory.push(avg);
+  if (eyeHistory.length > 30) eyeHistory.shift();
 
-    if (camera) { camera.stop(); }
-
-    log("Hayotiylik tasdiqlandi. Rasmingiz backendga yuborilmoqda...", "#60a5fa");
-
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const canvasCtx = canvas.getContext('2d');
-
-    // Oyna teskari (mirror) bo'lgani uchun to'g'rilab kesib olamiz
-    canvasCtx.translate(canvas.width, 0);
-    canvasCtx.scale(-1, 1);
-    canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(async (blob) => {
-        if (!blob) {
-            log("Xato: Rasmni yuklab bo'lmadi.", "#ef4444");
-            return;
-        }
-
-        const fd = new FormData();
-        fd.append('file', blob, 'webcam.jpg');
-
-        try {
-            // Slesh (/) belgilari va manzil aniqlashtirildi
-<!--            const response = await fetch('http://localhost:8000/verify', {-->
-
-            const response = await fetch('/verify', {
-                method: 'POST',
-                body: fd
-            });
-
-            if (!response.ok) {
-               throw new Error(`Server xatosi: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            if (data.status === "success") {
-                resultBox.className = 'result-box success';
-                resultBox.textContent = `Xush kelibsiz, ${data.user}! Moslik: ${data.confidence}`;
-                log(`✓ ${data.user} ekanligingiz tasdiqlandi!`, "#4ade80");
-                faceRing.className = 'face-ring success';
-            } else {
-                resultBox.className = 'result-box fail';
-                resultBox.textContent = data.message || "Yuz mos kelmadi!";
-                log("✗ Tanimadim. Bazadagi rasm bilan farq juda katta.", "#f87171");
-                faceRing.className = 'face-ring fail';
-            }
-        } catch (err) {
-            console.error(err);
-            log(`Backend bilan aloqa yo'q! (${err.message})`, "#ef4444");
-            resultBox.className = 'result-box fail';
-            resultBox.textContent = "Server bilan bog'lanishda xatolik!";
-        }
-    }, 'image/jpeg', 0.95);
+  // Ko'z yumildi (past) keyin ochildi (yuqori)
+  if (eyeHistory.length >= 6) {
+    const recent = eyeHistory.slice(-6);
+    const min = Math.min(...recent);
+    const max = Math.max(...recent);
+    if (min < 0.18 && max > 0.22) return true;
   }
+  return false;
+}
 
-  /* ───── Start ───── */
-  async function startLiveness() {
-    btnStart.disabled   = true;
-    completed = false;
-    running   = false;
-    blinkCount = 0; nodCount = 0; faceFrames = 0; faceSec = 0;
-    eyeClosed  = false; lastNoseY = null; nodCooldown = false;
-    currentStep = 0;
+function detectHeadLeft() {
+  // Burun uchi va quloq orasidagi nisbat
+  const nose = getPoint(1);
+  const leftEar = getPoint(234);
+  const rightEar = getPoint(454);
+  const total = dist(leftEar, rightEar);
+  const toRight = dist(nose, rightEar);
+  const yaw = toRight / total; // > 0.6 → chapga
 
-    resultBox.className = 'result-box';
-    faceRing.className  = 'face-ring';
-    scoreFill.style.width = '0%';
-    scorePct.textContent  = '0%';
-    scoreFill.style.background = '#6b7280';
+  headYawHistory.push(yaw);
+  if (headYawHistory.length > 20) headYawHistory.shift();
 
-    for (let i = 0; i < 3; i++) { setStepState(i, ''); }
-    setStepProg(0, 0, 3); setStepProg(1, 0, 2); setStepProg(2, 0, 5, 's');
-    updateMetrics();
+  const max = Math.max(...headYawHistory.slice(-10));
+  return max > 0.60;
+}
 
-    log('Kamera va modellar tayyorlanmoqda...', '#6b7280');
-    camHint.textContent = 'Yuklanmoqda...';
+function detectHeadRight() {
+  const nose = getPoint(1);
+  const leftEar = getPoint(234);
+  const rightEar = getPoint(454);
+  const total = dist(leftEar, rightEar);
+  const toLeft = dist(nose, leftEar);
+  const yaw = toLeft / total; // > 0.6 → o'ngga
 
-    // Model faqat bir marta yuklanadi
-    if (!faceMesh) {
-      faceMesh = new FaceMesh({
-        locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
-      });
-      faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6
-      });
-      faceMesh.onResults(onResults);
-    }
+  headYawHistory.push(yaw);
+  if (headYawHistory.length > 20) headYawHistory.shift();
+
+  const max = Math.max(...headYawHistory.slice(-10));
+  return max > 0.60;
+}
+
+function detectNod() {
+  const nose = getPoint(1);
+  const chin = getPoint(199);
+  const forehead = getPoint(10);
+  const faceH = dist(forehead, chin);
+  const noseRatio = (chin.y - nose.y) / faceH;
+
+  headPitchHistory.push(noseRatio);
+  if (headPitchHistory.length > 20) headPitchHistory.shift();
+
+  if (headPitchHistory.length >= 8) {
+    const min = Math.min(...headPitchHistory.slice(-8));
+    const max = Math.max(...headPitchHistory.slice(-8));
+    if (max - min > 0.06) return true;
+  }
+  return false;
+}
+
+function detectSmile() {
+  const leftMouth  = getPoint(61);
+  const rightMouth = getPoint(291);
+  const topLip     = getPoint(13);
+  const botLip     = getPoint(14);
+
+  const mouthW = dist(leftMouth, rightMouth);
+  const mouthH = dist(topLip, botLip);
+  const ratio = mouthW / (mouthH + 0.001);
+
+  mouthHistory.push(ratio);
+  if (mouthHistory.length > 20) mouthHistory.shift();
+
+  const max = Math.max(...mouthHistory.slice(-10));
+  return max > 5.5;
+}
+
+function dist(a, b) {
+  return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+}
+
+// ── Liveness flow ──
+function startLiveness() {
+  tasks = pickTasks(3);
+  stepDone = tasks.map(()=>false);
+  currentStep = -1;
+  isRunning = true;
+  eyeHistory=[];headYawHistory=[];headPitchHistory=[];mouthHistory=[];
+
+  renderSteps();
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('resultBox').className = 'result';
+  document.getElementById('camWrap').className = 'cam-wrap state-scan';
+
+  nextStep();
+}
+
+function renderSteps() {
+  const row = document.getElementById('stepsRow');
+  row.innerHTML = tasks.map((t,i)=>`
+    <div class="step" id="step_${i}">
+      <div class="s-icon">${t.icon}</div>
+      <div class="s-label">${t.label}</div>
+    </div>
+  `).join('');
+}
+
+function nextStep() {
+  currentStep++;
+  if (currentStep >= tasks.length) {
+    allDone();
+    return;
+  }
+  updateStepUI();
+  startStepTimer();
+}
+
+function updateStepUI() {
+  tasks.forEach((_,i)=>{
+    const el = document.getElementById('step_'+i);
+    if (!el) return;
+    el.className = 'step' + (i===currentStep?' active':i<currentStep?' done':'');
+  });
+
+  const task = tasks[currentStep];
+  setInstr('active', task.instruction, '');
+  updateProgress();
+}
+
+function startStepTimer() {
+  clearTimer();
+  const task = tasks[currentStep];
+  stepStart = Date.now();
+
+  progInterval = setInterval(()=>{
+    const elapsed = Date.now() - stepStart;
+    const pct = Math.min(100, (elapsed/task.timeout)*100);
+    document.getElementById('progBar').style.width = pct+'%';
+    const rem = Math.ceil((task.timeout-elapsed)/1000);
+    document.getElementById('instrTimer').textContent = rem+'s';
+    if (elapsed >= task.timeout) failStep();
+  }, 100);
+}
+
+function clearTimer() {
+  clearInterval(progInterval);
+  clearTimeout(stepTimer);
+  progInterval = null;
+  document.getElementById('instrTimer').textContent = '';
+}
+
+function completeStep() {
+  clearTimer();
+  stepDone[currentStep] = true;
+  const el = document.getElementById('step_'+currentStep);
+  if (el) el.className = 'step done';
+  document.getElementById('progBar').style.width = '100%';
+  eyeHistory=[];headYawHistory=[];headPitchHistory=[];mouthHistory=[];
+
+  setInstr('ok','✓ Bajarildi!','');
+  setTimeout(()=>nextStep(), 700);
+}
+
+function failStep() {
+  clearTimer();
+  isRunning = false;
+  document.getElementById('camWrap').className = 'cam-wrap state-err';
+  setInstr('err','Vaqt tugadi. Qaytadan urinib ko\'ring.','');
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('progBar').style.width = '0%';
+}
+
+function updateProgress() {
+  const done = stepDone.filter(Boolean).length;
+  document.getElementById('progBar').style.width = (done/tasks.length*100)+'%';
+}
+
+function allDone() {
+  clearTimer();
+  isRunning = false;
+  document.getElementById('camWrap').className = 'cam-wrap state-ok';
+  setInstr('ok','✓ Liveness tasdiqlandi! Yuz tahlil qilinmoqda...','');
+  document.getElementById('progBar').style.width = '100%';
+  captureAndVerify();
+}
+
+// ── Verify ──
+async function captureAndVerify() {
+  if (verifying) return;
+  verifying = true;
+
+  const ctx = hiddenCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+
+  hiddenCanvas.toBlob(async (blob)=>{
+    const fd = new FormData();
+    fd.append('file', blob, 'capture.jpg');
+    const api = document.getElementById('apiUrl').value.replace(/\/$/,'');
 
     try {
-      // MediaPipe-ga kamerani boshqarishni topshiramiz (Ziddiyat bartaraf etildi)
-      if (!camera) {
-        camera = new Camera(video, {
-          onFrame: async () => {
-            if (running && faceMesh) {
-              await faceMesh.send({ image: video });
-            }
-          },
-          width: 640,
-          height: 480
-        });
-      }
-
-      await camera.start();
-      running = true;
-      setStepState(0, 'active');
-      camHint.textContent = 'Ko\'zingizni qisib-oching (3 marta)';
-      log('Boshlandi. Ko\'zingizni qisib-oching!', '#60a5fa');
-
-    } catch (e) {
-      log('Kamera yoqishda xatolik: ' + e.message, '#f87171');
-      btnStart.disabled = false;
+      const res = await fetch(`${api}/verify`, {method:'POST', body:fd});
+      const data = await res.json();
+      showResult(data);
+    } catch(e) {
+      showResult({status:'error', message:'Server bilan ulanmadi'});
+    } finally {
+      verifying = false;
+      document.getElementById('btnStart').disabled = false;
     }
+  }, 'image/jpeg', 0.92);
+}
+
+function showResult(data) {
+  const box = document.getElementById('resultBox');
+  box.className = 'result show ' + (data.status==='success'?'ok':'err');
+  document.getElementById('rName').textContent = data.status==='success' ? '✓ '+data.user : '✗ Tanilmadi';
+  document.getElementById('rConf').textContent = ' '+(data.confidence||'—');
+  document.getElementById('rDist').textContent = ' '+(data.distance??'—');
+
+  if (data.status==='success') {
+    setInstr('ok','✓ Xush kelibsiz, '+data.user+'!','');
+    document.getElementById('camWrap').className = 'cam-wrap state-ok';
+  } else {
+    setInstr('err', data.message||'Yuz tanilmadi','');
+    document.getElementById('camWrap').className = 'cam-wrap state-err';
   }
+}
 
-  /* ───── Reset ───── */
-  function resetAll() {
-    running = false;
-    completed = false;
-    if (camera) { camera.stop(); }
+function setInstr(type, msg, timer) {
+  const box = document.getElementById('instrBox');
+  box.className = 'instr '+type;
+  document.getElementById('instrText').textContent = msg;
+  document.getElementById('instrTimer').textContent = timer;
+}
 
-    blinkCount = 0; nodCount = 0; faceFrames = 0; faceSec = 0;
-    eyeClosed  = false; lastNoseY = null; nodCooldown = false;
-    currentStep = -1;
+function resetAll() {
+  clearTimer();
+  isRunning = false;
+  verifying = false;
+  currentStep = -1;
+  tasks = [];
+  stepDone = [];
+  eyeHistory=[];headYawHistory=[];headPitchHistory=[];mouthHistory=[];
 
-    faceRing.className    = 'face-ring';
-    resultBox.className   = 'result-box';
-    scoreFill.style.width = '0%';
-    scorePct.textContent  = '0%';
-    camHint.textContent   = 'Kamera yoqilmagan';
-    btnStart.disabled     = false;
+  document.getElementById('stepsRow').innerHTML = '';
+  document.getElementById('progBar').style.width = '0%';
+  document.getElementById('resultBox').className = 'result';
+  document.getElementById('camWrap').className = 'cam-wrap';
+  document.getElementById('btnStart').disabled = false;
+  setInstr('','Boshlash tugmasini bosing','');
 
-    for (let i = 0; i < 3; i++) { setStepState(i, ''); }
-    setStepProg(0, 0, 3); setStepProg(1, 0, 2); setStepProg(2, 0, 5, 's');
-    updateMetrics();
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-    log('Tizim qayta o\'rnatildi. "Boshlash" tugmasini bosing.', '#6b7280');
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+}
+
+// ── DB ──
+async function loadDb() {
+  const api = document.getElementById('apiUrl').value.replace(/\/$/,'');
+  try {
+    const res = await fetch(`${api}/db/list`);
+    const data = await res.json();
+    const chips = document.getElementById('dbChips');
+    chips.innerHTML = data.users?.length
+      ? data.users.map(u=>`<span class="chip">${u}</span>`).join('')
+      : '<span class="db-empty">Baza bo\'sh</span>';
+  } catch {
+    document.getElementById('dbChips').innerHTML = '<span class="db-empty">Server bilan ulanmadi</span>';
   }
+}
+
+function toggleAdd() {
+  document.getElementById('addForm').classList.toggle('show');
+}
+
+function onFile(input) {
+  const lbl = document.getElementById('fileLbl');
+  if (input.files[0]) {
+    lbl.textContent = '✓ '+input.files[0].name.slice(0,14);
+    lbl.classList.add('sel');
+  }
+}
+
+async function addUser() {
+  const name = document.getElementById('newName').value.trim();
+  const file = document.getElementById('newFile').files[0];
+  const msg = document.getElementById('addMsg');
+  if (!name||!file) { msg.className='add-msg show err'; msg.textContent='⚠ Ism va rasm kerak'; return; }
+
+  const api = document.getElementById('apiUrl').value.replace(/\/$/,'');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(`${api}/db/add?name=${encodeURIComponent(name)}`,{method:'POST',body:fd});
+    const data = await res.json();
+    if (data.status==='success') {
+      msg.className='add-msg show ok'; msg.textContent='✓ '+data.message;
+      document.getElementById('newName').value='';
+      document.getElementById('newFile').value='';
+      document.getElementById('fileLbl').textContent='📎 Rasm';
+      document.getElementById('fileLbl').classList.remove('sel');
+      loadDb();
+    } else { msg.className='add-msg show err'; msg.textContent='✗ '+data.message; }
+  } catch { msg.className='add-msg show err'; msg.textContent='✗ Server bilan ulanmadi'; }
+}
+
+initCamera();
+setInterval(loadDb, 15000);
 </script>
 </body>
 </html>
