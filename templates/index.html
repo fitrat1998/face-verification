@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Auth</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: rgba(100,200,255,0.12);
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+    --success: #00ff88;
+    --danger: #ff3355;
+    --warn: #ffb300;
+    --text: #e8eaf0;
+    --muted: #666880;
+    --scan: rgba(0,212,255,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(124,58,237,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(0,212,255,0.06) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { position: relative; z-index: 1; width: 100%; max-width: 480px; }
+
+  .header {
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }
+
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 1rem;
+  }
+
+  .logo-icon {
+    width: 44px; height: 44px;
+    border: 1.5px solid var(--accent);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    background: rgba(0,212,255,0.06);
+  }
+
+  .logo-icon svg { width: 22px; height: 22px; }
+
+  .title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 0.4rem;
+  }
+
+  .tabs {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 5px;
+    margin-bottom: 1.5rem;
+    gap: 4px;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 10px 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+  }
+
+  .tab.active {
+    background: var(--surface2);
+    color: var(--accent);
+    border: 1px solid rgba(0,212,255,0.25);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.3), transparent);
+  }
+
+  .video-wrap {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #08080f;
+    aspect-ratio: 4/3;
+    margin-bottom: 1.2rem;
+    border: 1px solid var(--border);
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1);
+  }
+
+  .face-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .face-guide {
+    width: 160px;
+    height: 200px;
+    border: 2px solid rgba(0,212,255,0.3);
+    border-radius: 50% / 45%;
+    position: relative;
+    transition: border-color 0.3s;
+  }
+
+  .face-guide.detected { border-color: rgba(0,255,136,0.7); }
+
+  .face-guide::before,
+  .face-guide::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    border-color: inherit;
+    border-style: solid;
+  }
+
+  .face-guide::before { top: -2px; left: -2px; border-width: 2px 0 0 2px; border-radius: 4px 0 0 0; }
+  .face-guide::after { bottom: -2px; right: -2px; border-width: 0 2px 2px 0; border-radius: 0 0 4px 0; }
+
+  .scan-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    top: 0;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .scan-line.active {
+    opacity: 0.8;
+    animation: scan 2s linear infinite;
+  }
+
+  @keyframes scan {
+    0% { top: 0%; }
+    100% { top: 100%; }
+  }
+
+  .cam-status {
+    position: absolute;
+    top: 10px; left: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    background: rgba(0,0,0,0.6);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(0,212,255,0.2);
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+    animation: blink 1.5s ease-in-out infinite;
+  }
+
+  .dot.live { background: var(--success); }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .face-count {
+    position: absolute;
+    top: 10px; right: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    background: rgba(0,0,0,0.6);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(0,212,255,0.2);
+    color: var(--muted);
+    transition: color 0.3s;
+  }
+
+  .face-count.detected { color: var(--success); }
+
+  .input-group {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+
+  .input-group label {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .input-group input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .input-group input:focus {
+    border-color: rgba(0,212,255,0.4);
+  }
+
+  .input-group input::placeholder { color: var(--muted); }
+
+  .btn {
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+    color: var(--accent);
+    border: 1px solid rgba(0,212,255,0.35);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(0,212,255,0.25), rgba(124,58,237,0.25));
+    border-color: rgba(0,212,255,0.6);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-primary.loading::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+    animation: shimmer 1.2s infinite;
+  }
+
+  @keyframes shimmer { 100% { left: 100%; } }
+
+  .alert {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    margin-top: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .alert-success { background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.25); color: #00ff88; }
+  .alert-error   { background: rgba(255,51,85,0.08);  border: 1px solid rgba(255,51,85,0.25);  color: #ff3355; }
+  .alert-info    { background: rgba(0,212,255,0.08);  border: 1px solid rgba(0,212,255,0.2);   color: var(--accent); }
+
+  .alert-icon { font-size: 1rem; flex-shrink: 0; }
+
+  .confidence-bar {
+    margin-top: 1rem;
+  }
+
+  .confidence-label {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .bar-track {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s ease, background 0.3s;
+    background: var(--accent);
+  }
+
+  .users-list {
+    margin-top: 1.2rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .users-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .user-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .chip::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.5;
+  }
+
+  .no-cam {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .no-cam svg { opacity: 0.3; }
+
+  .section-hidden { display: none !important; }
+
+  #dashboard {
+    text-align: center;
+    padding: 2rem;
+  }
+
+  .welcome-avatar {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(124,58,237,0.2));
+    border: 2px solid rgba(0,212,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1.2rem;
+    font-size: 2rem;
+  }
+
+  .welcome-name {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent);
+    margin-bottom: 0.4rem;
+  }
+
+  .welcome-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+  }
+
+  .btn-logout {
+    margin-top: 1.5rem;
+    padding: 10px 24px;
+    width: auto;
+    background: transparent;
+    border: 1px solid rgba(255,51,85,0.3);
+    color: var(--danger);
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-logout:hover {
+    background: rgba(255,51,85,0.08);
+    border-color: rgba(255,51,85,0.6);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#00d4ff" stroke-width="1.5">
+          <path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/>
+          <path d="M8.5 8.5 C8.5 9.8 9.5 11 12 11 C14.5 11 15.5 9.8 15.5 8.5"/>
+          <rect x="2" y="15" width="20" height="7" rx="3"/>
+          <path d="M6 19 l2-3 2 3 2-3 2 3 2-3"/>
+        </svg>
+      </div>
+      <span class="title">FaceAuth</span>
+    </div>
+    <p class="subtitle">Yuz orqali autentifikatsiya</p>
+  </div>
+
+  <div id="auth-panel">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('login')">Kirish</button>
+      <button class="tab" onclick="switchTab('register')">Ro'yxat</button>
+    </div>
+
+    <div class="card">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="face-overlay">
+          <div class="face-guide" id="faceGuide">
+            <div class="scan-line" id="scanLine"></div>
+          </div>
+        </div>
+        <div class="cam-status">
+          <div class="dot" id="camDot"></div>
+          <span id="camLabel">KAMERA</span>
+        </div>
+        <div class="face-count" id="faceCount">YUZ YO'Q</div>
+      </div>
+
+      <div id="reg-name" class="input-group section-hidden">
+        <label>Ismingiz</label>
+        <input type="text" id="username" placeholder="masalan: ali_karimov" maxlength="30" />
+      </div>
+
+      <button class="btn btn-primary" id="actionBtn" onclick="handleAction()">
+        <span id="btnText">Yuz bilan kirish</span>
+      </button>
+
+      <div id="alertBox"></div>
+      <div id="confBox"></div>
+    </div>
+
+    <div id="usersList" class="users-list section-hidden">
+      <div class="users-label">Ro'yxatdagi foydalanuvchilar</div>
+      <div class="user-chips" id="userChips"></div>
+    </div>
+  </div>
+
+  <div id="dashboard" class="section-hidden">
+    <div class="card">
+      <div class="welcome-avatar">👤</div>
+      <div class="welcome-name" id="welcomeName"></div>
+      <div class="welcome-sub">MUVAFFAQIYATLI KIRDI</div>
+      <div style="margin-top:1rem; font-family:'Space Mono',monospace; font-size:0.7rem; color:var(--muted);">
+        <span id="confScore"></span>
+      </div>
+      <button class="btn-logout" onclick="logout()">Chiqish</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5050/api';
+let stream = null;
+let detectInterval = null;
+let currentTab = 'login';
+let faceDetected = false;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    document.getElementById('camDot').classList.add('live');
+    document.getElementById('camLabel').textContent = 'JONLI';
+    startDetection();
+  } catch(e) {
+    const wrap = document.querySelector('.video-wrap');
+    wrap.innerHTML = `<div class="no-cam"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22M17 17H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1M7 3h10l3 3h1a2 2 0 0 1 2 2v9.5"/></svg><span>Kamera topilmadi</span></div>`;
+  }
+}
+
+function captureFrame() {
+  const video = document.getElementById('video');
+  if (!video.readyState) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+async function startDetection() {
+  detectInterval = setInterval(async () => {
+    const frame = captureFrame();
+    if (!frame) return;
+    try {
+      const res = await fetch(`${API}/detect`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({image: frame}) });
+      const data = await res.json();
+      faceDetected = data.detected;
+      const guide = document.getElementById('faceGuide');
+      const count = document.getElementById('faceCount');
+      const scan = document.getElementById('scanLine');
+      const btn = document.getElementById('actionBtn');
+      if (data.detected) {
+        guide.classList.add('detected');
+        count.classList.add('detected');
+        count.textContent = `YUZ: ${data.count}`;
+        scan.classList.add('active');
+        btn.disabled = false;
+      } else {
+        guide.classList.remove('detected');
+        count.classList.remove('detected');
+        count.textContent = 'YUZ YO\'Q';
+        scan.classList.remove('active');
+        btn.disabled = true;
+      }
+    } catch(e) {}
+  }, 600);
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
+  const regName = document.getElementById('reg-name');
+  const btnText = document.getElementById('btnText');
+  clearAlert();
+  if (tab === 'login') {
+    regName.classList.add('section-hidden');
+    btnText.textContent = 'Yuz bilan kirish';
+    loadUsers(false);
+  } else {
+    regName.classList.remove('section-hidden');
+    btnText.textContent = 'Ro\'yxatdan o\'tish';
+    loadUsers(true);
+  }
+}
+
+async function loadUsers(show) {
+  try {
+    const res = await fetch(`${API}/users`);
+    const data = await res.json();
+    const list = document.getElementById('usersList');
+    const chips = document.getElementById('userChips');
+    if (data.count > 0) {
+      list.classList.remove('section-hidden');
+      chips.innerHTML = data.users.map(u => `<div class="chip">${u}</div>`).join('');
+    } else {
+      list.classList.add('section-hidden');
+    }
+  } catch(e) {}
+}
+
+async function handleAction() {
+  const frame = captureFrame();
+  if (!frame) return;
+  const btn = document.getElementById('actionBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+
+  if (currentTab === 'login') {
+    await doLogin(frame);
+  } else {
+    await doRegister(frame);
+  }
+
+  btn.classList.remove('loading');
+  btn.disabled = false;
+}
+
+async function doLogin(frame) {
+  try {
+    const res = await fetch(`${API}/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({image: frame}) });
+    const data = await res.json();
+    showConf(data.confidence);
+    if (data.success) {
+      showAlert(data.message, 'success');
+      setTimeout(() => showDashboard(data.username, data.confidence), 1200);
+    } else {
+      showAlert(data.message, 'error');
+    }
+  } catch(e) {
+    showAlert('Server bilan ulanishda xato', 'error');
+  }
+}
+
+async function doRegister(frame) {
+  const username = document.getElementById('username').value.trim();
+  if (!username) { showAlert('Ism kiriting!', 'error'); return; }
+  try {
+    const res = await fetch(`${API}/register`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, image: frame}) });
+    const data = await res.json();
+    if (data.success) {
+      showAlert(data.message, 'success');
+      document.getElementById('username').value = '';
+      loadUsers(true);
+    } else {
+      showAlert(data.message, 'error');
+    }
+  } catch(e) {
+    showAlert('Server bilan ulanishda xato', 'error');
+  }
+}
+
+function showDashboard(username, conf) {
+  document.getElementById('auth-panel').classList.add('section-hidden');
+  document.getElementById('dashboard').classList.remove('section-hidden');
+  document.getElementById('welcomeName').textContent = username;
+  document.getElementById('confScore').textContent = `Ishonch darajasi: ${conf}%`;
+  clearInterval(detectInterval);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+}
+
+async function logout() {
+  await fetch(`${API}/logout`, { method:'POST' }).catch(()=>{});
+  document.getElementById('dashboard').classList.add('section-hidden');
+  document.getElementById('auth-panel').classList.remove('section-hidden');
+  clearAlert();
+  startCamera();
+}
+
+function showAlert(msg, type) {
+  const icons = { success:'✓', error:'✗', info:'ℹ' };
+  document.getElementById('alertBox').innerHTML = `<div class="alert alert-${type}"><span class="alert-icon">${icons[type]||'•'}</span><span>${msg}</span></div>`;
+}
+
+function clearAlert() {
+  document.getElementById('alertBox').innerHTML = '';
+  document.getElementById('confBox').innerHTML = '';
+}
+
+function showConf(val) {
+  if (val === undefined) return;
+  const color = val >= 92 ? '#00ff88' : val >= 75 ? '#ffb300' : '#ff3355';
+  document.getElementById('confBox').innerHTML = `
+    <div class="confidence-bar">
+      <div class="confidence-label"><span>Moslik darajasi</span><span>${val}%</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${val}%;background:${color}"></div></div>
+    </div>`;
+}
+
+window.addEventListener('load', () => {
+  startCamera();
+  loadUsers(false);
+  document.getElementById('actionBtn').disabled = true;
+});
+</script>
+</body>
+</html>
