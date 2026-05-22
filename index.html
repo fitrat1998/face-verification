@@ -304,7 +304,6 @@ function getPoint(i) {
 }
 
 function detectBlink() {
-  // EAR (eye aspect ratio) — ikkala ko'z uchun
   const LEFT_EYE  = [159,145,158,153,160,144];
   const RIGHT_EYE = [386,374,385,380,387,373];
 
@@ -316,16 +315,35 @@ function detectBlink() {
 
   const le = ear(LEFT_EYE), re = ear(RIGHT_EYE), avg = (le+re)/2;
   eyeHistory.push(avg);
-  if (eyeHistory.length > 30) eyeHistory.shift();
+  if (eyeHistory.length > 60) eyeHistory.shift();
 
-  // Ko'z yumildi (past) keyin ochildi (yuqori)
-  if (eyeHistory.length >= 6) {
-    const recent = eyeHistory.slice(-6);
-    const min = Math.min(...recent);
-    const max = Math.max(...recent);
-    if (min < 0.18 && max > 0.22) return true;
+  if (eyeHistory.length < 8) return false;
+
+  // Oxirgi 30 ta qiymatdan baseline (ochiq ko'z) hisoblash
+  const baseline = eyeHistory.length >= 30
+    ? eyeHistory.slice(-30, -5)
+    : eyeHistory.slice(0, -3);
+  const baseAvg = baseline.reduce((a,b)=>a+b,0) / baseline.length;
+
+  const CLOSE_THRESH = baseAvg * 0.72;  // yumildi
+  const OPEN_THRESH  = baseAvg * 0.88;  // ochildi
+
+  const recent = eyeHistory.slice(-8);
+
+  // STATE MACHINE: OPEN → CLOSED → OPEN
+  let foundClose = false;
+  let foundOpenAfter = false;
+
+  for (let i = 0; i < recent.length; i++) {
+    if (!foundClose && recent[i] < CLOSE_THRESH) {
+      foundClose = true;
+    } else if (foundClose && recent[i] > OPEN_THRESH) {
+      foundOpenAfter = true;
+      break;
+    }
   }
-  return false;
+
+  return foundClose && foundOpenAfter;
 }
 
 function detectHeadLeft() {
