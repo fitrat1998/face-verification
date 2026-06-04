@@ -52,10 +52,7 @@
 
   .container { position: relative; z-index: 1; width: 100%; max-width: 480px; }
 
-  .header {
-    text-align: center;
-    margin-bottom: 2.5rem;
-  }
+  .header { text-align: center; margin-bottom: 2.5rem; }
 
   .logo {
     display: inline-flex;
@@ -69,7 +66,6 @@
     border: 1.5px solid var(--accent);
     border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    position: relative;
     background: rgba(0,212,255,0.06);
   }
 
@@ -207,10 +203,7 @@
     animation: scan 2s linear infinite;
   }
 
-  @keyframes scan {
-    0% { top: 0%; }
-    100% { top: 100%; }
-  }
+  @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
 
   .cam-status {
     position: absolute;
@@ -252,10 +245,7 @@
 
   .face-count.detected { color: var(--success); }
 
-  .input-group {
-    position: relative;
-    margin-bottom: 1rem;
-  }
+  .input-group { position: relative; margin-bottom: 1rem; }
 
   .input-group label {
     display: block;
@@ -280,10 +270,7 @@
     transition: border-color 0.2s;
   }
 
-  .input-group input:focus {
-    border-color: rgba(0,212,255,0.4);
-  }
-
+  .input-group input:focus { border-color: rgba(0,212,255,0.4); }
   .input-group input::placeholder { color: var(--muted); }
 
   .btn {
@@ -313,11 +300,7 @@
     transform: translateY(-1px);
   }
 
-  .btn-primary:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    transform: none;
-  }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
   .btn-primary.loading::after {
     content: '';
@@ -352,9 +335,7 @@
 
   .alert-icon { font-size: 1rem; flex-shrink: 0; }
 
-  .confidence-bar {
-    margin-top: 1rem;
-  }
+  .confidence-bar { margin-top: 1rem; }
 
   .confidence-label {
     display: flex;
@@ -397,11 +378,7 @@
     margin-bottom: 8px;
   }
 
-  .user-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
+  .user-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
   .chip {
     background: var(--surface2);
@@ -439,10 +416,7 @@
 
   .section-hidden { display: none !important; }
 
-  #dashboard {
-    text-align: center;
-    padding: 2rem;
-  }
+  #dashboard { text-align: center; padding: 2rem; }
 
   .welcome-avatar {
     width: 80px; height: 80px;
@@ -525,6 +499,7 @@
           <span id="camLabel">KAMERA</span>
         </div>
         <div class="face-count" id="faceCount">YUZ YO'Q</div>
+        <div class="face-count" id="eyeCount" style="top:36px;color:var(--warn)">KO'Z YO'Q</div>
       </div>
 
       <div id="reg-name" class="input-group section-hidden">
@@ -560,7 +535,9 @@
 </div>
 
 <script>
-const API = 'http://localhost:5050/api';
+// API URL - relative path, mobileda ham ishlaydi
+const API = '/api';
+
 let stream = null;
 let detectInterval = null;
 let currentTab = 'login';
@@ -568,29 +545,71 @@ let faceDetected = false;
 
 async function startCamera() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+    // Avval old kamera, bo'lmasa istalgan kamera
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'user' },
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      },
+      audio: false
+    });
     const video = document.getElementById('video');
     video.srcObject = stream;
     document.getElementById('camDot').classList.add('live');
     document.getElementById('camLabel').textContent = 'JONLI';
     startDetection();
   } catch(e) {
-    const wrap = document.querySelector('.video-wrap');
-    wrap.innerHTML = `<div class="no-cam"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22M17 17H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1M7 3h10l3 3h1a2 2 0 0 1 2 2v9.5"/></svg><span>Kamera topilmadi</span></div>`;
+    // Agar ideal bo'lmasa, oddiy kamera ochib ko'ramiz
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const video = document.getElementById('video');
+      video.srcObject = stream;
+      document.getElementById('camDot').classList.add('live');
+      document.getElementById('camLabel').textContent = 'JONLI';
+      startDetection();
+    } catch(e2) {
+      const wrap = document.querySelector('.video-wrap');
+      wrap.innerHTML = `<div class="no-cam"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22M17 17H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1M7 3h10l3 3h1a2 2 0 0 1 2 2v9.5"/></svg><span>Kamera topilmadi</span></div>`;
+    }
   }
 }
 
 function captureFrame() {
   const video = document.getElementById('video');
-  if (!video.readyState) return null;
+  if (!video.readyState || video.readyState < 2) return null;
+
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+
+  // Video elementining ekrandagi o'lchami
+  const rect = video.getBoundingClientRect();
+  const displayW = rect.width;
+  const displayH = rect.height;
+
+  // Doira o'lchami va markazi (CSS dan: 160x200, markazda)
+  const guideEl = document.getElementById('faceGuide');
+  const guideRect = guideEl.getBoundingClientRect();
+  const gCx = guideRect.left + guideRect.width / 2 - rect.left;
+  const gCy = guideRect.top + guideRect.height / 2 - rect.top;
+  const gR = Math.max(guideRect.width, guideRect.height) / 2 + 20;
+
+  // Display koordinatlarini video piksel koordinatlariga o'tkazish
+  const scaleX = vw / displayW;
+  const scaleY = vh / displayH;
+
+  const cropX = Math.max(0, Math.round((gCx - gR) * scaleX));
+  const cropY = Math.max(0, Math.round((gCy - gR) * scaleY));
+  const cropW = Math.min(vw - cropX, Math.round(gR * 2 * scaleX));
+  const cropH = Math.min(vh - cropY, Math.round(gR * 2 * scaleY));
+
+  // Crop qilingan yuzni 256x256 ga resize
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
+  canvas.width = 256;
+  canvas.height = 256;
   const ctx = canvas.getContext('2d');
-  ctx.translate(canvas.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, 256, 256);
+  return canvas.toDataURL('image/jpeg', 0.9);
 }
 
 async function startDetection() {
@@ -598,9 +617,20 @@ async function startDetection() {
     const frame = captureFrame();
     if (!frame) return;
     try {
-      const res = await fetch(`${API}/detect`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({image: frame}) });
+      const res = await fetch(`${API}/detect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: frame })
+      });
       const data = await res.json();
       faceDetected = data.detected;
+      const ready = data.ready || false;
+      const eyeEl = document.getElementById('eyeCount');
+      if (eyeEl) {
+        if (!data.detected) { eyeEl.textContent = "YUZ YO'Q"; eyeEl.style.color = 'var(--muted)'; }
+        else if (ready) { eyeEl.textContent = "KO'Z OCHIQ ✓"; eyeEl.style.color = 'var(--success)'; }
+        else { eyeEl.textContent = "KO'Z YOPIQ ✗"; eyeEl.style.color = 'var(--danger)'; }
+      }
       const guide = document.getElementById('faceGuide');
       const count = document.getElementById('faceCount');
       const scan = document.getElementById('scanLine');
@@ -608,18 +638,18 @@ async function startDetection() {
       if (data.detected) {
         guide.classList.add('detected');
         count.classList.add('detected');
-        count.textContent = `YUZ: ${data.count}`;
+        count.textContent = ready ? "YUZ ✓" : "KO'Z YOPING";
         scan.classList.add('active');
-        btn.disabled = false;
+        btn.disabled = !ready;
       } else {
         guide.classList.remove('detected');
         count.classList.remove('detected');
-        count.textContent = 'YUZ YO\'Q';
+        count.textContent = "YUZ YO'Q";
         scan.classList.remove('active');
         btn.disabled = true;
       }
     } catch(e) {}
-  }, 600);
+  }, 800);
 }
 
 function switchTab(tab) {
@@ -634,7 +664,7 @@ function switchTab(tab) {
     loadUsers(false);
   } else {
     regName.classList.remove('section-hidden');
-    btnText.textContent = 'Ro\'yxatdan o\'tish';
+    btnText.textContent = "Ro'yxatdan o'tish";
     loadUsers(true);
   }
 }
@@ -660,20 +690,22 @@ async function handleAction() {
   const btn = document.getElementById('actionBtn');
   btn.disabled = true;
   btn.classList.add('loading');
-
   if (currentTab === 'login') {
     await doLogin(frame);
   } else {
     await doRegister(frame);
   }
-
   btn.classList.remove('loading');
   btn.disabled = false;
 }
 
 async function doLogin(frame) {
   try {
-    const res = await fetch(`${API}/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({image: frame}) });
+    const res = await fetch(`${API}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: frame })
+    });
     const data = await res.json();
     showConf(data.confidence);
     if (data.success) {
@@ -691,7 +723,11 @@ async function doRegister(frame) {
   const username = document.getElementById('username').value.trim();
   if (!username) { showAlert('Ism kiriting!', 'error'); return; }
   try {
-    const res = await fetch(`${API}/register`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, image: frame}) });
+    const res = await fetch(`${API}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, image: frame })
+    });
     const data = await res.json();
     if (data.success) {
       showAlert(data.message, 'success');
@@ -715,7 +751,7 @@ function showDashboard(username, conf) {
 }
 
 async function logout() {
-  await fetch(`${API}/logout`, { method:'POST' }).catch(()=>{});
+  await fetch(`${API}/logout`, { method: 'POST' }).catch(()=>{});
   document.getElementById('dashboard').classList.add('section-hidden');
   document.getElementById('auth-panel').classList.remove('section-hidden');
   clearAlert();
@@ -723,7 +759,7 @@ async function logout() {
 }
 
 function showAlert(msg, type) {
-  const icons = { success:'✓', error:'✗', info:'ℹ' };
+  const icons = { success: '✓', error: '✗', info: 'ℹ' };
   document.getElementById('alertBox').innerHTML = `<div class="alert alert-${type}"><span class="alert-icon">${icons[type]||'•'}</span><span>${msg}</span></div>`;
 }
 
