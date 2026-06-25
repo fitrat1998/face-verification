@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<title>Face Auth Test Sahifasi</title>
+<style>
+    body {
+        font-family: -apple-system, Segoe UI, Arial, sans-serif;
+        max-width: 520px;
+        margin: 40px auto;
+        text-align: center;
+        background: #f5f6fa;
+        color: #222;
+    }
+    h2 { margin-bottom: 4px; }
+    p.subtitle { color: #666; margin-top: 0; }
+    video, canvas {
+        border-radius: 12px;
+        border: 2px solid #ddd;
+        background: #000;
+    }
+    .row { margin: 16px 0; }
+    input[type=text] {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        width: 200px;
+        font-size: 14px;
+    }
+    button {
+        padding: 10px 20px;
+        margin: 6px;
+        border-radius: 8px;
+        border: none;
+        font-size: 14px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .btn-register { background: #2d7ef7; color: white; }
+    .btn-verify { background: #16a34a; color: white; }
+    .btn-register:disabled, .btn-verify:disabled { background: #aaa; cursor: not-allowed; }
+    #result {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: 10px;
+        font-weight: 600;
+        min-height: 24px;
+    }
+    .result-ok { background: #d1fae5; color: #065f46; }
+    .result-fail { background: #fee2e2; color: #991b1b; }
+    .result-neutral { background: #eee; color: #333; }
+    .api-config {
+        font-size: 13px;
+        color: #888;
+        margin-top: 24px;
+        text-align: left;
+        background: white;
+        padding: 12px;
+        border-radius: 8px;
+    }
+</style>
+</head>
+<body>
+
+<h2>🎭 Face Auth — test sahifasi</h2>
+<p class="subtitle">Python Flask API bilan to'g'ridan-to'g'ri ishlaydi (Moodle'siz)</p>
+
+<div class="row">
+    <label>User ID: </label>
+    <input type="text" id="userId" value="demo_user" placeholder="masalan: demo_user">
+</div>
+
+<video id="video" width="400" height="300" autoplay playsinline muted></video>
+<canvas id="canvas" width="400" height="300" style="display:none;"></canvas>
+
+<div class="row">
+    <button id="btnRegister" class="btn-register">📷 Ro'yxatdan o'tkazish</button>
+    <button id="btnVerify" class="btn-verify">✅ Tekshirish (Login)</button>
+</div>
+
+<div id="result" class="result-neutral">Kamerani kutamiz...</div>
+
+<div class="api-config">
+    <b>API manzili:</b> <span id="apiUrlDisplay"></span><br>
+    Boshqa manzil ishlatish kerak bo'lsa, shu faylda <code>API_URL</code> o'zgaruvchisini o'zgartiring.
+</div>
+
+<script>
+// ============================================
+// SOZLAMA: Flask API qayerda ishlayotgan bo'lsa shu yerga yozing
+// ============================================
+const API_URL = "http://localhost:5001";
+document.getElementById("apiUrlDisplay").textContent = API_URL;
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const resultBox = document.getElementById("result");
+const btnRegister = document.getElementById("btnRegister");
+const btnVerify = document.getElementById("btnVerify");
+
+function setResult(text, type) {
+    resultBox.textContent = text;
+    resultBox.className = "result-" + type;
+}
+
+// Kamerani ochish
+navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300 } })
+    .then(stream => {
+        video.srcObject = stream;
+        setResult("Kamera tayyor. Tugmani bosing.", "neutral");
+    })
+    .catch(err => {
+        setResult("Kameraga ruxsat berilmadi: " + err.message, "fail");
+        btnRegister.disabled = true;
+        btnVerify.disabled = true;
+    });
+
+function captureImage() {
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, 400, 300);
+    return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+async function callApi(endpoint, userId, image) {
+    const resp = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, image: image })
+    });
+    return await resp.json();
+}
+
+btnRegister.addEventListener("click", async () => {
+    const userId = document.getElementById("userId").value.trim();
+    if (!userId) { setResult("User ID kiriting!", "fail"); return; }
+
+    setResult("Yuborilmoqda...", "neutral");
+    btnRegister.disabled = true;
+
+    try {
+        const image = captureImage();
+        const data = await callApi("/register", userId, image);
+        if (data.success) {
+            setResult(`✅ ${data.message}`, "ok");
+        } else {
+            setResult(`❌ ${data.error}`, "fail");
+        }
+    } catch (e) {
+        setResult("Server bilan bog'lanishda xato: " + e.message, "fail");
+    } finally {
+        btnRegister.disabled = false;
+    }
+});
+
+btnVerify.addEventListener("click", async () => {
+    const userId = document.getElementById("userId").value.trim();
+    if (!userId) { setResult("User ID kiriting!", "fail"); return; }
+
+    setResult("Tekshirilmoqda...", "neutral");
+    btnVerify.disabled = true;
+
+    try {
+        const image = captureImage();
+        const data = await callApi("/verify", userId, image);
+        if (data.success && data.match) {
+            setResult(`✅ Moslik topildi! Ishonch: ${(data.confidence * 100).toFixed(1)}%`, "ok");
+        } else if (data.success && !data.match) {
+            setResult(`❌ Moslik topilmadi. Ishonch: ${(data.confidence * 100).toFixed(1)}%`, "fail");
+        } else {
+            setResult(`❌ ${data.error}`, "fail");
+        }
+    } catch (e) {
+        setResult("Server bilan bog'lanishda xato: " + e.message, "fail");
+    } finally {
+        btnVerify.disabled = false;
+    }
+});
+</script>
+
+</body>
+</html>

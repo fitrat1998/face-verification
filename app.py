@@ -1,262 +1,213 @@
-from flask import Flask, request, jsonify, render_template, session
-from flask_cors import CORS
+"""
+Moodle uchun Face Recognition API servisi (TEST/DEMO versiyasi)
+================================================================
+Bu versiya OpenCV (Haar Cascade + LBPH) asosida ishlaydi - `dlib`
+kompilyatsiya talab qilmaydi, shuning uchun tez o'rnatiladi va
+test qilish uchun ideal.
+
+DIQQAT: LBPH dlib/face_recognition kutubxonasiga nisbatan ANCHA
+KAMROQ ANIQ. Bu versiya faqat:
+  1) Arxitekturani sinab ko'rish (Moodle <-> API <-> login oqimi)
+  2) Demo/prototip sifatida ko'rsatish
+uchun mos. Productionga chiqishdan oldin pastdagi "PRODUCTIONGA
+O'TISH" bo'limini o'qing.
+
+O'rnatish (test uchun yengil):
+    pip install flask flask-cors opencv-contrib-python pillow numpy
+
+Ishga tushirish:
+    python app.py
+    (default: http://0.0.0.0:5001)
+"""
+
+import base64
+import io
+import os
+
 import cv2
 import numpy as np
-import base64
-import os
-import json
-import re
-import secrets
-import urllib.request
-import tempfile
-
-import mediapipe as mp
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision as mp_vision
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
+from PIL import Image
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
-CORS(app, supports_credentials=True)
+CORS(app)  # Test paytida brauzerdan to'g'ridan-to'g'ri so'rov yuborish uchun
 
-KNOWN_FACES_DIR = "known_faces"
-USERS_FILE = "users.json"
-os.makedirs(KNOWN_FACES_DIR, exist_ok=True)
 
-# Ko'z landmarklari
-LEFT_EYE  = [33, 160, 158, 133, 153, 144]
-RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+@app.route("/")
+def serve_test_page():
+    """http://localhost:5001/ ochilganda test_webcam.html ko'rsatiladi."""
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "test_webcam.html")
 
-ALL_POINTS = list(set([
-    1, 4, 5, 195, 197, 6, 168, 8, 9,
-    33, 133, 362, 263,
-    61, 291, 13, 14, 17, 0,
-    70, 63, 105, 66, 107,
-    336, 296, 334, 293, 300,
-    234, 454, 152, 10,
-    338, 297, 332, 284, 251, 389, 356,
-    323, 361, 288, 397, 365, 379, 378,
-    400, 377, 148, 176, 149, 150, 136,
-    172, 58, 132, 93, 127, 162, 21, 54
-]))
+# Foydalanuvchilarning yuz rasmlari saqlanadigan papka
+FACES_DIR = "face_data"
+os.makedirs(FACES_DIR, exist_ok=True)
 
-# Model yuklab olish
-MODEL_PATH = os.path.join(tempfile.gettempdir(), "face_landmarker.task")
-if not os.path.exists(MODEL_PATH):
-    print("Downloading face_landmarker model (~30MB)...")
-    urllib.request.urlretrieve(
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-        MODEL_PATH
-    )
-    print("Model downloaded!")
-
-base_options = mp_python.BaseOptions(model_asset_path=MODEL_PATH)
-options = mp_vision.FaceLandmarkerOptions(
-    base_options=base_options,
-    num_faces=1,
-    min_face_detection_confidence=0.4,
-    min_face_presence_confidence=0.4,
+# OpenCV'ning tayyor yuz aniqlash modeli (Haar Cascade)
+FACE_CASCADE = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
-landmarker = mp_vision.FaceLandmarker.create_from_options(options)
-print("MediaPipe FaceLandmarker ready!")
 
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# LBPH solishtirish uchun "ishonch masofasi" chegarasi.
+# Past qiymat = qattiqroq, lekin kamroq distance kerak bo'lishi mumkin.
+# Test orqali o'zingiz uchun mos qiymatni topasiz (odatda 50-80 oralig'i).
+LBPH_CONFIDENCE_THRESHOLD = 70
 
-def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
 
-def decode_image(data_url):
-    if ',' in data_url:
-        data_url = data_url.split(',')[1]
-    img_bytes = base64.b64decode(data_url)
-    nparr = np.frombuffer(img_bytes, np.uint8)
-    return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+def _decode_base64_image(base64_string):
+    """Base64 stringni OpenCV grayscale numpy arrayga o'giradi"""
+    if "," in base64_string:
+        base64_string = base64_string.split(",")[1]
+    img_bytes = base64.b64decode(base64_string)
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    rgb_array = np.array(img)
+    gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
+    return gray
 
-def resize_if_large(img, max_width=640):
-    h, w = img.shape[:2]
-    if w > max_width:
-        scale = max_width / w
-        img = cv2.resize(img, (max_width, int(h * scale)))
-    return img
 
-def get_landmarks(img):
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
-    result = landmarker.detect(mp_image)
-    if result.face_landmarks:
-        return result.face_landmarks[0]
-    return None
+def _detect_face(gray_image):
+    """Rasmda yuzni topib, standart o'lchamga keltiradi (LBPH uchun shart)"""
+    faces = FACE_CASCADE.detectMultiScale(
+        gray_image, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
+    )
+    return faces
 
-def eye_aspect_ratio(landmarks, eye_points, w, h):
-    pts = [(landmarks[i].x * w, landmarks[i].y * h) for i in eye_points]
-    v1 = np.linalg.norm(np.array(pts[1]) - np.array(pts[5]))
-    v2 = np.linalg.norm(np.array(pts[2]) - np.array(pts[4]))
-    h1 = np.linalg.norm(np.array(pts[0]) - np.array(pts[3]))
-    return float((v1 + v2) / (2.0 * h1)) if h1 > 0 else 0.0
 
-def get_face_descriptor(img):
-    img = resize_if_large(img)
-    h, w = img.shape[:2]
-    landmarks = get_landmarks(img)
-    if landmarks is None:
-        return None, 0.0
+def _crop_and_resize_face(gray_image, face_box, size=(200, 200)):
+    x, y, w, h = face_box
+    face_crop = gray_image[y:y + h, x:x + w]
+    return cv2.resize(face_crop, size)
 
-    left_ear  = eye_aspect_ratio(landmarks, LEFT_EYE,  w, h)
-    right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE, w, h)
-    ear = (left_ear + right_ear) / 2.0
 
-    nose = landmarks[4]
-    cx, cy = nose.x, nose.y
-    face_width = abs(landmarks[454].x - landmarks[234].x) + 1e-6
+def _user_dir(user_id):
+    path = os.path.join(FACES_DIR, f"user_{user_id}")
+    os.makedirs(path, exist_ok=True)
+    return path
 
-    coords = []
-    for idx in ALL_POINTS:
-        lm = landmarks[idx]
-        coords.append((lm.x - cx) / face_width)
-        coords.append((lm.y - cy) / face_width)
 
-    return np.array(coords, dtype=np.float32), ear
+def _model_path(user_id):
+    return os.path.join(_user_dir(user_id), "model.yml")
 
-def augment_and_describe(img):
-    h, w = img.shape[:2]
-    variants = [img]
-    for gamma in [0.75, 1.25]:
-        table = np.array([((i/255.0)**(1.0/gamma))*255 for i in range(256)], dtype=np.uint8)
-        variants.append(cv2.LUT(img, table))
-    for angle in [-8, 8]:
-        M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
-        variants.append(cv2.warpAffine(img, M, (w, h)))
-    descriptors = []
-    for v in variants:
-        desc, _ = get_face_descriptor(v)
-        if desc is not None:
-            descriptors.append(desc.tolist())
-    return descriptors
 
-def compare_descriptors(d1, d2):
-    d1 = np.array(d1, dtype=np.float32)
-    d2 = np.array(d2, dtype=np.float32)
-    if len(d1) != len(d2):
-        return 0.0
-    dot  = np.dot(d1, d2)
-    norm = np.linalg.norm(d1) * np.linalg.norm(d2)
-    return float(dot / norm) if norm > 0 else 0.0
+@app.route("/register", methods=["POST"])
+def register_face():
+    """
+    Foydalanuvchi yuzini ro'yxatdan o'tkazish.
+    Body: { "user_id": "123", "image": "data:image/jpeg;base64,..." }
 
-def best_match_score(descriptor, user_data):
-    best = 0.0
-    for stored in user_data.get('descriptors', []):
-        s = compare_descriptors(descriptor, stored)
-        if s > best:
-            best = s
-    return best
+    Eslatma: aniqlikni oshirish uchun bir nechta rasm jamlab,
+    keyin /train chaqirish tavsiya etiladi (pastda).
+    """
+    data = request.get_json(force=True)
+    user_id = data.get("user_id")
+    image_b64 = data.get("image")
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+    if not user_id or not image_b64:
+        return jsonify({"success": False, "error": "user_id va image majburiy"}), 400
 
-@app.route('/api/detect', methods=['POST'])
-def detect():
-    img = decode_image(request.json.get('image', ''))
-    if img is None:
-        return jsonify({'detected': False, 'eyes': 0})
-    img = resize_if_large(img)
-    desc, ear = get_face_descriptor(img)
-    if desc is None:
-        return jsonify({'detected': False, 'eyes': 0})
+    try:
+        gray = _decode_base64_image(image_b64)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Rasmni o'qishda xato: {e}"}), 400
+
+    faces = _detect_face(gray)
+    if len(faces) == 0:
+        return jsonify({"success": False, "error": "Yuz topilmadi. Yorug'roq joyda, kameraga to'g'ri qarab urinib ko'ring."}), 400
+    if len(faces) > 1:
+        return jsonify({"success": False, "error": "Bir nechta yuz aniqlandi. Kadrda faqat bitta odam bo'lsin."}), 400
+
+    face_img = _crop_and_resize_face(gray, faces[0])
+
+    # Shu foydalanuvchining barcha namuna rasmlarini saqlaymiz.
+    user_dir = _user_dir(user_id)
+    existing = [f for f in os.listdir(user_dir) if f.startswith("sample_")]
+    sample_path = os.path.join(user_dir, f"sample_{len(existing)}.png")
+    cv2.imwrite(sample_path, face_img)
+
+    # Mavjud namunalar asosida modelni (qayta) o'qitamiz.
+    samples = []
+    labels = []
+    for fname in os.listdir(user_dir):
+        if fname.startswith("sample_"):
+            img = cv2.imread(os.path.join(user_dir, fname), cv2.IMREAD_GRAYSCALE)
+            samples.append(img)
+            labels.append(0)  # bitta foydalanuvchi uchun bitta model, label doim 0
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.train(samples, np.array(labels))
+    recognizer.save(_model_path(user_id))
+
     return jsonify({
-        'detected': True,
-        'eyes': 1 if ear > 0.18 else 0,
-        'ear': round(ear, 3),
-        'ready': ear > 0.18
+        "success": True,
+        "message": f"Yuz saqlandi ({len(samples)}-namuna). Yaxshi natija uchun kamida 5 ta turli burchakdan rasm yuborish tavsiya etiladi.",
+        "samples_count": len(samples),
     })
 
-@app.route('/api/register', methods=['POST'])
-def register():
-    data = request.json
-    username = data.get('username', '').strip()
-    if not username:
-        return jsonify({'success': False, 'message': 'Ism kiritilmagan'}), 400
-    if not re.match(r'^[a-zA-Z0-9_\u0400-\u04FF]{2,30}$', username):
-        return jsonify({'success': False, 'message': "Ism 2-30 ta harf bo'lishi kerak"}), 400
 
-    img = decode_image(data.get('image', ''))
-    if img is None:
-        return jsonify({'success': False, 'message': 'Rasm yuklashda xato'}), 400
-    img = resize_if_large(img)
+@app.route("/verify", methods=["POST"])
+def verify_face():
+    """
+    Login paytida yuzni tekshirish.
+    Body: { "user_id": "123", "image": "data:image/jpeg;base64,..." }
+    Javob: { "success": true, "match": true/false, "confidence": 0.92 }
+    """
+    data = request.get_json(force=True)
+    user_id = data.get("user_id")
+    image_b64 = data.get("image")
 
-    desc, ear = get_face_descriptor(img)
-    if desc is None:
-        return jsonify({'success': False, 'message': "Yuz topilmadi! Kameraga to'g'ri qarang"}), 400
-    if ear < 0.15:
-        return jsonify({'success': False, 'message': "Ko'zlaringiz ko'rinmayapti! Yuzingizni to'liq ko'rsating"}), 400
+    if not user_id or not image_b64:
+        return jsonify({"success": False, "error": "user_id va image majburiy"}), 400
 
-    users = load_users()
-    if username in users:
-        return jsonify({'success': False, 'message': "Bu ism allaqachon ro'yxatdan o'tgan"}), 400
+    model_path = _model_path(user_id)
+    if not os.path.exists(model_path):
+        return jsonify({"success": False, "error": "Bu foydalanuvchi uchun ro'yxatdan o'tgan yuz topilmadi"}), 404
 
-    descriptors = augment_and_describe(img)
-    if not descriptors:
-        return jsonify({'success': False, 'message': "Yuz tahlil qilib bo'lmadi"}), 400
+    try:
+        gray = _decode_base64_image(image_b64)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Rasmni o'qishda xato: {e}"}), 400
 
-    face_path = os.path.join(KNOWN_FACES_DIR, f'{username}.jpg')
-    cv2.imwrite(face_path, img)
-    users[username] = {'descriptors': descriptors, 'face_path': face_path}
-    save_users(users)
+    faces = _detect_face(gray)
+    if len(faces) == 0:
+        return jsonify({"success": False, "error": "Yuz topilmadi"}), 400
 
-    return jsonify({'success': True, 'message': f"{username} muvaffaqiyatli ro'yxatdan o'tdi! ({len(descriptors)} variant)"})
+    face_img = _crop_and_resize_face(gray, faces[0])
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    img = decode_image(request.json.get('image', ''))
-    if img is None:
-        return jsonify({'success': False, 'message': 'Rasm yuklashda xato'}), 400
-    img = resize_if_large(img)
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(model_path)
+    label, lbph_distance = recognizer.predict(face_img)
 
-    desc, ear = get_face_descriptor(img)
-    if desc is None:
-        return jsonify({'success': False, 'message': "Yuz topilmadi! Kameraga to'g'ri qarang"}), 400
-    if ear < 0.15:
-        return jsonify({'success': False, 'message': "Yuzingiz yopiq! Ko'zlaringizni ko'rsating", 'confidence': 0}), 400
+    is_match = lbph_distance <= LBPH_CONFIDENCE_THRESHOLD
+    # LBPH'da distance past = o'xshashroq. Buni 0-1 "ishonch"ga o'giramiz.
+    confidence = round(max(0.0, 1 - (lbph_distance / 100)), 4)
 
-    users = load_users()
-    if not users:
-        return jsonify({'success': False, 'message': "Hech kim ro'yxatdan o'tmagan"}), 400
+    return jsonify({
+        "success": True,
+        "match": bool(is_match),
+        "confidence": confidence,
+        "distance": round(float(lbph_distance), 2),
+    })
 
-    login_descs = augment_and_describe(img)
-    THRESHOLD = 0.985
-    best_match = None
-    best_score = 0.0
 
-    for uname, udata in users.items():
-        for ld in login_descs:
-            score = best_match_score(ld, udata)
-            if score > best_score:
-                best_score = score
-                best_match = uname
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "engine": "opencv-lbph (test mode)"})
 
-    if best_score >= THRESHOLD:
-        session['user'] = best_match
-        return jsonify({'success': True, 'message': f'Xush kelibsiz, {best_match}!',
-                        'username': best_match, 'confidence': round(best_score * 100, 1)})
-    else:
-        return jsonify({'success': False,
-                        'message': f"Yuz tanilmadi (moslik: {round(best_score*100,1)}%)",
-                        'confidence': round(best_score * 100, 1)})
 
-@app.route('/api/users', methods=['GET'])
-def get_users():
-    users = load_users()
-    return jsonify({'users': list(users.keys()), 'count': len(users)})
-
-@app.route('/api/logout', methods=['POST'])
-def logout():
-    session.pop('user', None)
-    return jsonify({'success': True})
-
-if __name__ == '__main__':
-    print("Face Auth (MediaPipe Tasks) starting on http://0.0.0.0:5050")
-    app.run(debug=False, port=5050, host='0.0.0.0')
+if __name__ == "__main__":
+    # ============================================================
+    # PRODUCTIONGA O'TISH:
+    # LBPH yorug'lik, burchak, yosh o'zgarishiga sezgir va xato
+    # qabul qilish (false accept) darajasi yuqori bo'lishi mumkin.
+    # Real foydalanish uchun:
+    #   1) face_recognition (dlib) yoki
+    #   2) InsightFace / ArcFace (chuqur o'rganish asosida, ancha aniq)
+    # kutubxonasiga o'tish tavsiya etiladi. Ular ko'proq resurs va
+    # to'g'ri o'rnatish (CMake, build-essential) talab qiladi, shuning
+    # uchun avval shu test versiyasida butun oqimni (Moodle -> API ->
+    # login) ishga tushirib, keyin "miya"sini almashtirish to'g'riroq.
+    #
+    # Productionda HTTPS orqali ishlatish SHART (kamera/biometrik
+    # ma'lumot ochiq HTTP orqali yuborilmasin).
+    # ============================================================
+    app.run(host="0.0.0.0", port=5001, debug=False)
